@@ -1,0 +1,9 @@
+{
+  "name": "Ashen Veil League Hub",
+  "description": "A comprehensive league management platform for DCUO featuring interactive dorms, multi-channel chat, SOS requests, and AI-powered guides.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
