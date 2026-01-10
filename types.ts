@@ -18,6 +18,17 @@ export enum View {
   ChronoScribe = 'ChronoScribe'
 }
 
+export interface NewsArticle {
+  id: string;
+  leagueId: string;
+  title: string;
+  category: 'Raid' | 'Recruitment' | 'Achievement' | 'Announcement' | 'Tournament';
+  content: string;
+  author: string;
+  timestamp: string;
+  imageUrl?: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -54,100 +65,3 @@ export interface Trophy {
   title: string;
   description: string;
   image: string;
-  earnedBy: string[];
-}
-
-export interface LoreItem {
-  id: string;
-  title: string;
-  description: string;
-  image: string;
-}
-
-export interface ArmorSuit {
-  id: string;
-  title: string;
-  description: string;
-  image: string;
-  modelUrl?: string;
-  stats: {
-    power: number;
-    defense: number;
-    health: number;
-    vitalization: number;
-  };
-}
-
-export interface MirrorAsset {
-  id: string;
-  type: 'image' | 'model';
-  url: string;
-  name: string;
-  timestamp: Date;
-}
-
-export interface DormItem {
-  id: string;
-  type: 'trophy_case' | 'lore_chest' | 'crystal_ball' | 'journal' | 'armory' | 'mirror' | 'piggy_bank';
-  x: number;
-  y: number;
-  title: string;
-}
-
-export interface Message {
-  id: string;
-  sender: string;
-  text: string;
-  timestamp: Date;
-  channel: 'league' | 'member' | 'global' | 'sos';
-}
-
-export interface SOSRequest {
-  id: string;
-  requestorId: string;
-  requestorName: string;
-  title: string;
-  description: string;
-  amount: number;
-  status: 'open' | 'accepted' | 'completed' | 'cancelled' | 'expired';
-  helperId?: string;
-  helperName?: string;
-  timestamp: Date;
-}
-
-export interface Assignment {
-  id: string;
-  leaderId: string;
-  leaderName: string;
-  assigneeId: string;
-  assigneeName: string;
-  title: string;
-  description: string;
-  amount: number;
-  status: 'pending' | 'completed';
-  timestamp: Date;
-}
-
-export interface Note {
-  id: string;
-  title: string;
-  content: string;
-  folder: string;
-}
-
-export interface BrokerSale {
-  id: string;
-  sellerName: string;
-  itemName: string;
-  price: number;
-  timestamp: Date;
-}
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      'model-viewer': any;
-      [elemName: string]: any;
-    }
-  }
-}

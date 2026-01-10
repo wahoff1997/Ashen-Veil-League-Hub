@@ -1,4 +1,4 @@
-import { supabase } from "./services/supabase";
+
 import React, { useState, useEffect, useRef } from 'react';
 import Layout from './components/Layout';
 import DormRoom from './components/Dorm/DormRoom';
@@ -6,6 +6,25 @@ import EchoChat from './components/Echo/EchoChat';
 import { View, User, League, Friend, ArmorSuit, SOSRequest, Assignment, Note, BrokerSale } from './types';
 import { getGeminiResponse } from './services/geminiService';
 import { GoogleGenAI } from "@google/genai";
+
+interface VaultEntry {
+  userId: string;
+  username: string;
+  status: 'pending' | 'accepted' | 'denied';
+  timestamp: string;
+}
+
+interface Vault {
+  id: string;
+  creatorId: string;
+  creatorName: string;
+  title: string;
+  reward: string;
+  requirement: string;
+  status: 'active' | 'closed';
+  participants: VaultEntry[];
+  timestamp: string;
+}
 
 const INITIAL_USER: User = {
   id: 'user_1',
@@ -32,62 +51,174 @@ const INITIAL_USER: User = {
   dormBackground: 'https://dl.dropboxusercontent.com/scl/fi/uf5m6jn2js1ytfc5zp206/Dorm-Default.png?rlkey=w6xw2ppg2xbubvu5vd0yevyq7&st=e1bpmwip&raw=1'
 };
 
+const AuthPage: React.FC<{ onLogin: (user: User) => void }> = ({ onLogin }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLogin) {
+      const storedUsers = JSON.parse(localStorage.getItem('registered_users') || '[]');
+      const found = storedUsers.find((u: any) => u.email === email && u.password === password);
+      
+      if (found || (email === INITIAL_USER.email && password === 'password')) {
+        const userToLogin = found ? { ...INITIAL_USER, ...found } : INITIAL_USER;
+        localStorage.setItem('active_session', JSON.stringify(userToLogin));
+        onLogin(userToLogin);
+      } else {
+        alert("Invalid credentials. Try email: jacob.wahoff1997@gmail.com / password: password");
+      }
+    } else {
+      if (!email || !password || !username) return;
+      const newUser = { email, password, username, id: Date.now().toString() };
+      const storedUsers = JSON.parse(localStorage.getItem('registered_users') || '[]');
+      localStorage.setItem('registered_users', JSON.stringify([...storedUsers, newUser]));
+      alert("Account created! Please log in.");
+      setIsLogin(true);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-[#0b0b1a] overflow-hidden z-[1000]">
+      <div className="absolute inset-0 opacity-20">
+        <img src="https://images.unsplash.com/photo-1614728263952-84ea206f99b6?q=80&w=2000&auto=format&fit=crop" className="w-full h-full object-cover" alt="bg" />
+      </div>
+      <div className="scanline-overlay opacity-30"></div>
+      
+      <div className="relative glass p-10 rounded-[32px] w-full max-w-md border-purple-500/30 shadow-2xl animate-slideUp">
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center text-3xl shadow-2xl mystic-glow mb-4">
+            <i className="fas fa-ghost"></i>
+          </div>
+          <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Ashen Veil</h2>
+          <p className="text-purple-400 text-[10px] font-black uppercase tracking-[0.4em]">League Authentication</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {!isLogin && (
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-500 font-black uppercase">Operative Codename</label>
+              <input value={username} onChange={e => setUsername(e.target.value)} required className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500 transition-all" />
+            </div>
+          )}
+          <div className="space-y-1">
+            <label className="text-[10px] text-gray-500 font-black uppercase">Neural ID (Email)</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500 transition-all" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-gray-500 font-black uppercase">Access Cipher (Password)</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500 transition-all" />
+          </div>
+          
+          <button type="submit" className="w-full bg-purple-600 hover:bg-purple-500 text-white font-black py-4 rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95 mt-4">
+            {isLogin ? 'Establish Connection' : 'Register Identity'}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button onClick={() => setIsLogin(!isLogin)} className="text-[10px] text-gray-400 hover:text-purple-400 font-black uppercase tracking-widest transition-all">
+            {isLogin ? "No identity on record? Register here" : "Return to Login Hub"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<View>(View.Home);
-  const [currentUser, setCurrentUser] = useState<User>(INITIAL_USER);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [showLeagueEditor, setShowLeagueEditor] = useState(false);
   const [activeLeagueIndex, setActiveLeagueIndex] = useState(0);
-  async function testSupabase() {
-    const { data, error } = await supabase.auth.getSession();
-    console.log("Supabase session:", data, error);
-  }
 
   useEffect(() => {
-    const savedBg = localStorage.getItem('dorno_background');
-    if (savedBg) {
-      setCurrentUser(prev => ({ ...prev, dormBackground: savedBg }));
-    }
-    
-    const savedLeagues = localStorage.getItem('ashen_veil_leagues');
-    if (savedLeagues) {
-      try {
-        setCurrentUser(prev => ({ ...prev, leagues: JSON.parse(savedLeagues) }));
-      } catch (e) { console.error("Corrupt league data"); }
+    const session = localStorage.getItem('active_session');
+    if (session) {
+      const userData = JSON.parse(session);
+      setCurrentUser(userData);
+      
+      const savedIndex = localStorage.getItem(`active_league_idx_${userData.id}`);
+      if (savedIndex !== null) {
+        setActiveLeagueIndex(parseInt(savedIndex));
+      }
     }
 
-    const savedUser = localStorage.getItem('user_profile_data');
-    if (savedUser) {
-      try {
-        const parsed = JSON.parse(savedUser);
-        setCurrentUser(prev => ({ ...prev, ...parsed }));
-      } catch (e) { console.error("Corrupt profile data"); }
+    const savedBg = localStorage.getItem('dorno_background');
+    if (savedBg && currentUser) {
+      setCurrentUser(prev => prev ? ({ ...prev, dormBackground: savedBg }) : null);
     }
-  }, []);
+  }, [currentUser?.id]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('active_session');
+    setCurrentUser(null);
+    setViewingUserId(null);
+    setActiveView(View.Home);
+  };
 
   const handleUpdateLeague = (updatedLeague: League) => {
+    if (!currentUser) return;
     const newLeagues = currentUser.leagues.map(l => l.id === updatedLeague.id ? updatedLeague : l);
     setCurrentUser({ ...currentUser, leagues: newLeagues });
     localStorage.setItem('ashen_veil_leagues', JSON.stringify(newLeagues));
   };
 
   const handleAddLeague = (newLeague: League) => {
+    if (!currentUser) return;
     const newLeagues = [...currentUser.leagues, newLeague];
     setCurrentUser({ ...currentUser, leagues: newLeagues });
-    localStorage.setItem('ashen_veil_leagues', JSON.stringify(newLeagues));
+    localStorage.setItem('active_session', JSON.stringify({ ...currentUser, leagues: newLeagues }));
     setActiveLeagueIndex(newLeagues.length - 1);
+    localStorage.setItem(`active_league_idx_${currentUser.id}`, (newLeagues.length - 1).toString());
+  };
+
+  const handleDisbandLeague = (leagueId: string) => {
+    if (!currentUser) return;
+    if (!confirm("Are you sure you want to disband this sanctuary? This action is permanent.")) return;
+    const newLeagues = currentUser.leagues.filter(l => l.id !== leagueId);
+    setCurrentUser({ ...currentUser, leagues: newLeagues });
+    localStorage.setItem('active_session', JSON.stringify({ ...currentUser, leagues: newLeagues }));
+    setActiveLeagueIndex(0);
+    localStorage.setItem(`active_league_idx_${currentUser.id}`, '0');
+    setActiveView(View.Home);
+  };
+
+  const handleLeaveLeague = (leagueId: string) => {
+    if (!currentUser) return;
+    if (!confirm("Confirm termination of neural link to this sanctuary?")) return;
+    const newLeagues = currentUser.leagues.filter(l => l.id !== leagueId);
+    setCurrentUser({ ...currentUser, leagues: newLeagues });
+    localStorage.setItem('active_session', JSON.stringify({ ...currentUser, leagues: newLeagues }));
+    setActiveLeagueIndex(0);
+    localStorage.setItem(`active_league_idx_${currentUser.id}`, '0');
+    setActiveView(View.Home);
   };
 
   const handleUpdateProfile = (profileData: Partial<User>) => {
+    if (!currentUser) return;
     const newUser = { ...currentUser, ...profileData };
     setCurrentUser(newUser);
-    localStorage.setItem('user_profile_data', JSON.stringify({
-      avatar: newUser.avatar,
-      username: newUser.username,
-      email: newUser.email,
-      thoughtEssence: newUser.thoughtEssence,
-      friends: newUser.friends
-    }));
+    localStorage.setItem('active_session', JSON.stringify(newUser));
   };
+
+  const handleViewProfile = (userId: string) => {
+    setViewingUserId(userId);
+    setActiveView(View.Profile);
+  };
+
+  const handleSwitchActiveLeague = (index: number) => {
+    setActiveLeagueIndex(index);
+    if (currentUser) {
+      localStorage.setItem(`active_league_idx_${currentUser.id}`, index.toString());
+    }
+  };
+
+  if (!currentUser) {
+    return <AuthPage onLogin={setCurrentUser} />;
+  }
 
   const activeLeague = currentUser.leagues[activeLeagueIndex] || currentUser.leagues[0];
 
@@ -100,19 +231,30 @@ const App: React.FC = () => {
       case View.Journal:
         return <JournalView currentUser={currentUser} onUpdateUser={setCurrentUser} />;
       case View.Profile:
-        return <ProfileView user={currentUser} onUpdateUser={handleUpdateProfile} />;
+        return (
+          <ProfileView 
+            user={currentUser} 
+            viewingUserId={viewingUserId} 
+            activeLeagueIndex={activeLeagueIndex}
+            onUpdateUser={handleUpdateProfile} 
+            onViewUser={handleViewProfile}
+            onResetView={() => setViewingUserId(null)}
+          />
+        );
       case View.Characters:
-        return <LeagueRosterView activeLeague={activeLeague} currentUser={currentUser} />;
+        return <LeagueRosterView activeLeague={activeLeague} currentUser={currentUser} onViewProfile={handleViewProfile} />;
       case View.Trader:
         return <VeilWrightTrader currentUser={currentUser} />;
       case View.Broker:
         return <BrokerView currentUser={currentUser} />;
+      case View.Vault:
+        return <VaultView currentUser={currentUser} />;
       case View.LeagueFinder:
         return (
           <LeagueFinderView 
             user={currentUser} 
             activeLeagueIndex={activeLeagueIndex}
-            onSwitchLeague={setActiveLeagueIndex}
+            onSwitchLeague={handleSwitchActiveLeague}
             onCreateLeague={handleAddLeague}
             onGoHome={() => setActiveView(View.Home)}
           />
@@ -142,25 +284,82 @@ const App: React.FC = () => {
 
                <div className="relative z-10 flex-1 text-center md:text-left">
                  <h2 className="text-5xl font-black text-white mb-2 italic uppercase tracking-tighter">{activeLeague.name}</h2>
-                 <p className="text-purple-300 text-sm font-bold flex items-center justify-center md:justify-start gap-6 mb-4">
-                   <span><i className="fas fa-users mr-2"></i>{activeLeague.memberCount} members</span>
-                   <span><i className="fas fa-gamepad mr-2"></i>{activeLeague.platform}</span>
-                   <span><i className="fas fa-shield-halved mr-2"></i>{activeLeague.role}</span>
-                 </p>
+                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mb-4">
+                    <span className="bg-purple-600 text-white text-[8px] font-black px-3 py-1 rounded-full uppercase tracking-widest animate-pulse">Neural Link Active</span>
+                    <p className="text-purple-300 text-sm font-bold flex items-center gap-4">
+                      <span><i className="fas fa-users mr-2"></i>{activeLeague.memberCount} members</span>
+                      <span><i className="fas fa-gamepad mr-2"></i>{activeLeague.platform}</span>
+                      <span><i className="fas fa-shield-halved mr-2"></i>{activeLeague.role}</span>
+                    </p>
+                 </div>
                  <p className="text-gray-300 text-lg leading-relaxed max-w-2xl font-serif">
                    {activeLeague.description || 'Welcome to the primary hub of the Ashen Veil. Our legends are written in the void.'}
                  </p>
                </div>
 
-               {activeLeague.role === 'Leader' && (
-                 <button 
-                  onClick={() => setShowLeagueEditor(true)}
-                  className="absolute top-8 right-8 bg-purple-600 hover:bg-purple-500 text-white border border-purple-400/30 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all z-20 shadow-lg"
-                 >
-                   <i className="fas fa-cog mr-2"></i>
-                   Modify Sanctuary
-                 </button>
-               )}
+               <div className="absolute top-8 right-8 flex gap-3 z-20">
+                 {activeLeague.role === 'Leader' ? (
+                   <>
+                    <button 
+                      onClick={() => setShowLeagueEditor(true)}
+                      className="bg-purple-600 hover:bg-purple-500 text-white border border-purple-400/30 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg"
+                    >
+                      <i className="fas fa-cog mr-2"></i> Modify
+                    </button>
+                    <button 
+                      onClick={() => handleDisbandLeague(activeLeague.id)}
+                      className="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                    >
+                      <i className="fas fa-trash-alt mr-2"></i> Disband
+                    </button>
+                   </>
+                 ) : (
+                   <button 
+                    onClick={() => handleLeaveLeague(activeLeague.id)}
+                    className="bg-orange-600/20 hover:bg-orange-600 text-orange-400 hover:text-white border border-orange-500/30 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                   >
+                     <i className="fas fa-sign-out-alt mr-2"></i> Leave Sanctuary
+                   </button>
+                 )}
+               </div>
+            </div>
+
+            <div className="glass p-8 rounded-3xl border-purple-500/20">
+               <h3 className="text-white font-black uppercase text-xs tracking-[0.3em] mb-6 flex items-center gap-3">
+                 <i className="fas fa-microchip text-purple-400"></i>
+                 Sanctuary Neural Link Controller
+               </h3>
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 {currentUser.leagues.map((l, idx) => (
+                   <div 
+                    key={l.id} 
+                    onClick={() => handleSwitchActiveLeague(idx)}
+                    className={`p-6 rounded-2xl border transition-all cursor-pointer group relative overflow-hidden ${activeLeagueIndex === idx ? 'bg-purple-600/20 border-purple-500 shadow-[0_0_30px_rgba(139,92,246,0.2)]' : 'bg-black/40 border-white/5 hover:border-purple-500/30'}`}
+                   >
+                     <div className="relative z-10 flex flex-col h-full justify-between">
+                       <div>
+                         <div className="flex justify-between items-start mb-2">
+                           <h4 className={`text-sm font-black uppercase italic tracking-wider ${activeLeagueIndex === idx ? 'text-white' : 'text-gray-400 group-hover:text-gray-200'}`}>{l.name}</h4>
+                           {activeLeagueIndex === idx && <i className="fas fa-check-circle text-purple-400 text-lg"></i>}
+                         </div>
+                         <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">{l.role} • {l.platform}</p>
+                       </div>
+                       <button className={`mt-4 w-full py-2 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all ${activeLeagueIndex === idx ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-600 group-hover:bg-white/10 group-hover:text-gray-300'}`}>
+                         {activeLeagueIndex === idx ? 'Link Established' : 'Initiate Neural Link'}
+                       </button>
+                     </div>
+                   </div>
+                 ))}
+                 {currentUser.leagues.length < 3 && (
+                   <div 
+                    onClick={() => setActiveView(View.LeagueFinder)}
+                    className="p-6 rounded-2xl border border-dashed border-white/10 bg-white/2 hover:bg-white/5 transition-all cursor-pointer flex flex-col items-center justify-center text-center space-y-3"
+                   >
+                     <i className="fas fa-plus-circle text-gray-600 text-2xl group-hover:text-purple-400 transition-colors"></i>
+                     <p className="text-[9px] text-gray-600 font-black uppercase tracking-widest">Connect Additional Sanctuary</p>
+                   </div>
+                 )}
+               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 shrink-0">
@@ -170,7 +369,7 @@ const App: React.FC = () => {
                 { view: View.Archive, label: 'Archive', sub: 'Guides & knowledge', icon: 'fa-book-open' },
                 { view: View.ChronoScribe, label: 'ChronoScribe', sub: 'Ask the ChronoScribe', icon: 'fa-wand-magic-sparkles' },
               ].map((card, i) => (
-                <div key={i} onClick={() => setActiveView(card.view)} className="glass p-6 rounded-2xl hover:bg-white/10 transition-all cursor-pointer group">
+                <div key={i} onClick={() => { setViewingUserId(null); setActiveView(card.view); }} className="glass p-6 rounded-2xl hover:bg-white/10 transition-all cursor-pointer group">
                   <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center mb-4 group-hover:bg-purple-600 transition-colors">
                     <i className={`fas ${card.icon} text-purple-400 group-hover:text-white`}></i>
                   </div>
@@ -235,25 +434,304 @@ const App: React.FC = () => {
   };
 
   return (
-    <Layout activeView={activeView} onViewChange={setActiveView} currentUser={currentUser}>
+    <Layout 
+      activeView={activeView} 
+      onViewChange={(v) => { setViewingUserId(null); setActiveView(v); }} 
+      currentUser={currentUser} 
+      onLogout={handleLogout}
+    >
       {renderView()}
     </Layout>
   );
 };
 
-export default App;
-<button onClick={testSupabase}>
-  Test Supabase
-</button>
+// --- COMPONENT DEFINITIONS ---
 
-const LeagueRosterView: React.FC<{ activeLeague: League, currentUser: User }> = ({ activeLeague, currentUser }) => {
+const VaultView: React.FC<{ currentUser: User }> = ({ currentUser }) => {
+  const [vaults, setVaults] = useState<Vault[]>(() => {
+    const saved = localStorage.getItem('league_vaults');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showHostForm, setShowHostForm] = useState(false);
+  const [vaultForm, setVaultForm] = useState({ title: '', reward: '', requirement: '' });
+  
+  const isLeader = currentUser.leagues.some(l => l.role === 'Leader');
+
+  useEffect(() => {
+    localStorage.setItem('league_vaults', JSON.stringify(vaults));
+  }, [vaults]);
+
+  const handleHostVault = () => {
+    if (!vaultForm.title) return;
+    const newVault: Vault = {
+      id: Date.now().toString(),
+      creatorId: currentUser.id,
+      creatorName: currentUser.username,
+      title: vaultForm.title,
+      reward: vaultForm.reward,
+      requirement: vaultForm.requirement,
+      status: 'active',
+      participants: [],
+      timestamp: new Date().toISOString()
+    };
+    setVaults([newVault, ...vaults]);
+    setShowHostForm(false);
+    setVaultForm({ title: '', reward: '', requirement: '' });
+  };
+
+  const signUpForVault = (vaultId: string) => {
+    const updated = vaults.map(v => {
+      if (v.id === vaultId && !v.participants.some(p => p.userId === currentUser.id)) {
+        return {
+          ...v,
+          participants: [...v.participants, { 
+            userId: currentUser.id, 
+            username: currentUser.username, 
+            status: 'pending' as const, 
+            timestamp: new Date().toISOString() 
+          }]
+        };
+      }
+      return v;
+    });
+    setVaults(updated);
+    alert("Application transmitted. Awaiting Leader authorization.");
+  };
+
+  const handleParticipant = (vaultId: string, userId: string, action: 'accept' | 'deny') => {
+    const updated = vaults.map(v => {
+      if (v.id === vaultId) {
+        return {
+          ...v,
+          participants: v.participants.map(p => 
+            p.userId === userId ? { ...p, status: action === 'accept' ? 'accepted' : 'denied' } : p
+          )
+        };
+      }
+      return v;
+    });
+    setVaults(updated);
+  };
+
+  const closeVault = (vaultId: string) => {
+    if (!confirm("Seal this vault transmission?")) return;
+    setVaults(vaults.map(v => v.id === vaultId ? { ...v, status: 'closed' } : v));
+  };
+
+  return (
+    <div className="h-full flex flex-col space-y-6 animate-fadeIn overflow-hidden">
+      <div className="flex justify-between items-center shrink-0">
+        <div>
+          <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">The Vault</h2>
+          <p className="text-purple-400 text-[10px] font-black uppercase tracking-[0.4em]">Restricted High-Value Transmissions</p>
+        </div>
+        {isLeader && (
+          <button 
+            onClick={() => setShowHostForm(true)}
+            className="bg-purple-600 hover:bg-purple-500 text-white px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg"
+          >
+            <i className="fas fa-plus mr-2"></i> Host New Vault
+          </button>
+        )}
+      </div>
+
+      {showHostForm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-8 bg-black/90 backdrop-blur-xl">
+          <div className="bg-[#0d0d1f] border border-purple-500/30 rounded-3xl w-full max-w-xl p-8 animate-slideUp space-y-6">
+            <h3 className="text-2xl font-black text-white italic uppercase">Initiate Vault Transmission</h3>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-500 uppercase font-black">Vault Designation</label>
+                <input value={vaultForm.title} onChange={e => setVaultForm({...vaultForm, title: e.target.value})} placeholder="e.g. Artifact Overflow" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-500 uppercase font-black">Treasury Reward</label>
+                <input value={vaultForm.reward} onChange={e => setVaultForm({...vaultForm, reward: e.target.value})} placeholder="e.g. 5,000 Thought Essence" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-500 uppercase font-black">Entry Requirement</label>
+                <input value={vaultForm.requirement} onChange={e => setVaultForm({...vaultForm, requirement: e.target.value})} placeholder="e.g. 3x Rare Catalysts" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none" />
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <button onClick={handleHostVault} className="flex-1 bg-purple-600 text-white font-black py-4 rounded-xl uppercase">Start Hosting</button>
+              <button onClick={() => setShowHostForm(false)} className="px-8 bg-white/5 text-gray-500 font-black py-4 rounded-xl uppercase">Abort</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {vaults.map(vault => (
+            <div key={vault.id} className={`bg-[#0d0d1f]/50 border rounded-3xl p-8 transition-all ${vault.status === 'closed' ? 'opacity-40 border-white/5 grayscale' : 'border-purple-500/20 hover:border-purple-500/40 shadow-2xl'}`}>
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-2xl font-black text-white italic uppercase tracking-tight">{vault.title}</h3>
+                  <p className="text-[9px] text-gray-500 uppercase font-black mt-1">Host: {vault.creatorName}</p>
+                </div>
+                <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase ${vault.status === 'active' ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-500'}`}>
+                  {vault.status}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6 mb-8">
+                <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
+                  <p className="text-[8px] text-purple-400 uppercase font-black mb-1">Vault Reward</p>
+                  <p className="text-sm font-bold text-white truncate">{vault.reward || 'Unspecified'}</p>
+                </div>
+                <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
+                  <p className="text-[8px] text-red-400 uppercase font-black mb-1">Access Protocol</p>
+                  <p className="text-sm font-bold text-white truncate">{vault.requirement || 'No Requirement'}</p>
+                </div>
+              </div>
+
+              {vault.status === 'active' && (
+                <div className="space-y-6">
+                  {vault.creatorId === currentUser.id ? (
+                    <div className="space-y-4">
+                      <h4 className="text-[10px] text-purple-400 font-black uppercase tracking-widest border-b border-purple-500/20 pb-2 flex justify-between items-center">
+                        Identity Verification Required
+                        <span className="bg-purple-600/20 text-purple-400 px-2 py-0.5 rounded">{vault.participants.filter(p => p.status === 'pending').length} New</span>
+                      </h4>
+                      <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                        {vault.participants.map(p => (
+                          <div key={p.userId} className="flex items-center justify-between p-3 bg-black/40 rounded-xl border border-white/5">
+                            <span className="text-xs font-bold text-white">{p.username}</span>
+                            <div className="flex gap-2">
+                              {p.status === 'pending' ? (
+                                <>
+                                  <button onClick={() => handleParticipant(vault.id, p.userId, 'accept')} className="bg-green-600/20 hover:bg-green-600 text-green-500 hover:text-white border border-green-500/30 px-3 py-1 rounded text-[9px] font-black uppercase transition-all">Grant Access</button>
+                                  <button onClick={() => handleParticipant(vault.id, p.userId, 'deny')} className="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/30 px-3 py-1 rounded text-[9px] font-black uppercase transition-all">Deny</button>
+                                </>
+                              ) : (
+                                <span className={`text-[8px] font-black uppercase ${p.status === 'accepted' ? 'text-green-500' : 'text-red-500'}`}>{p.status}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {vault.participants.length === 0 && <p className="text-[9px] text-gray-700 italic py-4">No operatives signed up yet.</p>}
+                      </div>
+                      <button onClick={() => closeVault(vault.id)} className="w-full bg-white/5 hover:bg-red-600/20 border border-white/10 hover:border-red-500/30 text-gray-500 hover:text-red-400 font-black py-3 rounded-xl text-[9px] uppercase tracking-widest transition-all">Terminate Vault Transmission</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between pt-6 border-t border-white/5">
+                      {vault.participants.some(p => p.userId === currentUser.id) ? (
+                        <div className="flex items-center gap-3">
+                          <div className={`w-2 h-2 rounded-full animate-pulse ${vault.participants.find(p => p.userId === currentUser.id)?.status === 'accepted' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                          <p className="text-[10px] font-black uppercase text-purple-400">Application: {vault.participants.find(p => p.userId === currentUser.id)?.status}</p>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => signUpForVault(vault.id)}
+                          className="w-full bg-purple-600 hover:bg-purple-500 text-white font-black py-4 rounded-xl text-[10px] uppercase tracking-widest shadow-lg transition-all"
+                        >
+                          Request Vault Access
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+          {vaults.length === 0 && (
+            <div className="col-span-full py-40 flex flex-col items-center justify-center opacity-10 border-2 border-dashed border-white/10 rounded-[40px]">
+              <i className="fas fa-vault text-[120px] mb-8"></i>
+              <p className="text-2xl font-black uppercase tracking-[0.4em]">No Active Vaults Transmitting</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CharacterDossierOverlay: React.FC<{ character: any, allCases: any[], allSuits: ArmorSuit[], onClose: () => void }> = ({ character, allCases, allSuits, onClose }) => {
+  const linkedCase = allCases.find(c => c.id === character.linkedCaseId);
+  const linkedSuit = allSuits.find(s => s.id === character.linkedSuitId);
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/98 backdrop-blur-2xl p-8 animate-fadeIn">
+      <div className="bg-[#050510] border border-purple-500/30 rounded-3xl w-full max-w-6xl h-full max-h-[90vh] flex flex-col overflow-hidden shadow-[0_0_100px_rgba(139,92,246,0.15)] relative">
+        <div className="p-8 border-b border-white/5 flex justify-between items-center shrink-0">
+          <div>
+            <h3 className="text-4xl font-black text-white italic uppercase tracking-tighter">Dossier: {character.name}</h3>
+            <p className="text-purple-400 text-[10px] font-black uppercase tracking-[0.4em]">Classified Intelligence Report</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-all"><i className="fas fa-times text-4xl"></i></button>
+        </div>
+
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          <div className="w-1/3 border-r border-white/5 bg-black/40 p-8 flex flex-col overflow-y-auto custom-scrollbar">
+            <h4 className="text-[10px] text-purple-400 font-black uppercase tracking-widest mb-6">Combat Chassis Interface</h4>
+            {linkedSuit ? (
+              <div className="space-y-8">
+                <div className="aspect-[3/4] bg-black/60 rounded-3xl border border-white/10 p-4 flex items-center justify-center relative overflow-hidden group">
+                  <img src={linkedSuit.image} className="max-w-full max-h-full object-contain filter drop-shadow-[0_0_20px_rgba(139,92,246,0.4)]" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-purple-900/20 to-transparent pointer-events-none"></div>
+                </div>
+                <div className="space-y-4">
+                  <h5 className="text-white font-black uppercase italic text-xl">{linkedSuit.title}</h5>
+                  <div className="grid grid-cols-2 gap-4">
+                    {Object.entries(linkedSuit.stats || {}).map(([key, val]: [string, any]) => (
+                      <div key={key} className="bg-white/5 p-3 rounded-xl border border-white/5">
+                        <p className="text-[8px] text-gray-500 uppercase font-black">{key}</p>
+                        <p className="text-white font-black text-sm">{val.toLocaleString()}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center opacity-20 text-center">
+                <i className="fas fa-shield-halved text-6xl mb-4"></i>
+                <p className="text-[10px] font-black uppercase">No Armory Signature Found</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 bg-black/20 p-12 overflow-y-auto custom-scrollbar">
+            <h4 className="text-[10px] text-amber-500 font-black uppercase tracking-[0.4em] mb-10 border-b border-amber-500/20 pb-2">Archived Lore & Historical Chronology</h4>
+            {linkedCase ? (
+              <div className="space-y-12">
+                {linkedCase.entries.map((entry: any) => (
+                  <div key={entry.id} className="space-y-6">
+                    <div className="flex justify-between items-baseline">
+                      <h5 className="text-2xl font-black text-white uppercase italic">{entry.title}</h5>
+                      <span className="text-[10px] text-gray-600 font-black uppercase">{new Date(entry.timestamp).toLocaleDateString()}</span>
+                    </div>
+                    {entry.subjectImage && (
+                      <img src={entry.subjectImage} className="w-full h-64 object-cover rounded-2xl border border-white/5 grayscale group-hover:grayscale-0 transition-all duration-700" />
+                    )}
+                    <div className="text-gray-400 font-serif text-lg leading-relaxed space-y-4">
+                      {entry.content.split('\n').filter((l: any) => l.trim()).map((p: string, i: number) => <p key={i}>{p}</p>)}
+                    </div>
+                    <div className="pt-4 border-t border-white/5 text-[9px] text-gray-600 uppercase font-black">Scribed By: {entry.author}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center opacity-20 text-center">
+                <i className="fas fa-scroll-old text-6xl mb-4"></i>
+                <p className="text-[10px] font-black uppercase">Historical Records Fragmented or Missing</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const LeagueRosterView: React.FC<{ activeLeague: League, currentUser: User, onViewProfile: (id: string) => void }> = ({ activeLeague, currentUser, onViewProfile }) => {
   const [inspectingMember, setInspectingMember] = useState<any | null>(null);
   
   const members = [
     { id: currentUser.id, name: currentUser.username, role: activeLeague.role, status: 'Online', platform: activeLeague.platform },
-    { id: 'm2', name: 'Slipthought', role: 'Member', status: 'Online', platform: 'PC' },
-    { id: 'm3', name: 'VeilWright', role: 'Member', status: 'Offline', platform: 'PS' },
-    { id: 'm4', name: 'ChronoKeeper', role: 'Member', status: 'Online', platform: 'PC' }
+    { id: 'f1', name: 'Slipthought', role: 'Member', status: 'Online', platform: 'PC' },
+    { id: 'f2', name: 'VeilWright', role: 'Member', status: 'Offline', platform: 'PS' },
+    { id: 'f3', name: 'ChronoKeeper', role: 'Member', status: 'Online', platform: 'PC' }
   ];
 
   return (
@@ -279,12 +757,20 @@ const LeagueRosterView: React.FC<{ activeLeague: League, currentUser: User }> = 
                     <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase border ${member.status === 'Online' ? 'bg-green-600/20 text-green-500 border-green-500/20' : 'bg-gray-600/20 text-gray-500 border-gray-500/20'}`}>{member.status}</span>
                   </div>
                </div>
-               <button 
-                 onClick={() => setInspectingMember(member)}
-                 className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl transition-all shadow-lg"
-               >
-                 View Profile
-               </button>
+               <div className="absolute right-4 top-1/2 -translate-y-1/2 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                 <button 
+                   onClick={() => onViewProfile(member.id)}
+                   className="bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl transition-all shadow-lg"
+                 >
+                   Profile
+                 </button>
+                 <button 
+                   onClick={() => setInspectingMember(member)}
+                   className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl transition-all"
+                 >
+                   Dossiers
+                 </button>
+               </div>
             </div>
           ))}
         </div>
@@ -306,6 +792,7 @@ const MemberIdentityModal: React.FC<{ member: any, onClose: () => void }> = ({ m
     cases: [],
     suits: []
   });
+  const [inspectingChar, setInspectingChar] = useState<any | null>(null);
 
   useEffect(() => {
     const savedChars = localStorage.getItem(`profile_chars_${member.id}`) || '[]';
@@ -340,11 +827,14 @@ const MemberIdentityModal: React.FC<{ member: any, onClose: () => void }> = ({ m
             <h4 className="text-[10px] text-purple-400 font-black uppercase tracking-[0.4em] mb-6 border-b border-purple-500/20 pb-2">Character Roster</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {memberData.characters.map((char: any) => (
-                <div key={char.id} className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                <div key={char.id} onClick={() => setInspectingChar(char)} className="bg-white/5 border border-white/10 rounded-2xl p-6 cursor-pointer hover:border-purple-500/40 transition-all group relative">
                    <h5 className="text-white font-black uppercase italic text-lg mb-2">{char.name}</h5>
                    <div className="space-y-1">
                       <p className="text-[9px] text-gray-500 uppercase font-black"><i className="fas fa-book-skull mr-2"></i> {char.linkedCaseId ? 'Has Linked Lore' : 'No Lore Record'}</p>
                       <p className="text-[9px] text-gray-500 uppercase font-black"><i className="fas fa-shield-halved mr-2"></i> {char.linkedSuitId ? 'Chassis Deployed' : 'No Chassis'}</p>
+                   </div>
+                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all">
+                      <i className="fas fa-eye text-purple-400"></i>
                    </div>
                 </div>
               ))}
@@ -373,6 +863,15 @@ const MemberIdentityModal: React.FC<{ member: any, onClose: () => void }> = ({ m
           </section>
         </div>
       </div>
+
+      {inspectingChar && (
+        <CharacterDossierOverlay 
+          character={inspectingChar} 
+          allCases={memberData.cases} 
+          allSuits={memberData.suits} 
+          onClose={() => setInspectingChar(null)} 
+        />
+      )}
     </div>
   );
 };
@@ -401,9 +900,9 @@ const JournalView: React.FC<{ currentUser: User, onUpdateUser: (u: User) => void
 
   const isLeader = currentUser.leagues.some(l => l.role === 'Leader');
   const members = [
-    { id: 'm2', name: 'Slipthought' },
-    { id: 'm3', name: 'VeilWright' },
-    { id: 'm4', name: 'ChronoKeeper' }
+    { id: 'f1', name: 'Slipthought' },
+    { id: 'f2', name: 'VeilWright' },
+    { id: 'f3', name: 'ChronoKeeper' }
   ];
 
   useEffect(() => {
@@ -547,12 +1046,12 @@ const JournalView: React.FC<{ currentUser: User, onUpdateUser: (u: User) => void
                         </select>
                       </div>
                     </div>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
+                    <div className="space-y-4 flex flex-col">
+                      <div className="space-y-2 flex-1">
                         <label className="text-[10px] text-gray-500 font-black uppercase">Detailed Protocol</label>
-                        <textarea value={assignForm.description} onChange={e => setAssignForm({...assignForm, description: e.target.value})} placeholder="Specific instructions for the member..." className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm h-28 outline-none focus:border-blue-500 resize-none" />
+                        <textarea value={assignForm.description} onChange={e => setAssignForm({...assignForm, description: e.target.value})} placeholder="Specific instructions for the member..." className="w-full h-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm min-h-[120px] outline-none focus:border-blue-500 resize-none" />
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-4 mt-4">
                          <div className="space-y-2">
                             <label className="text-[10px] text-purple-400 font-black uppercase">Essence Compensation</label>
                             <input type="number" value={assignForm.amount} onChange={e => setAssignForm({...assignForm, amount: Number(e.target.value)})} className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none" />
@@ -691,7 +1190,6 @@ const BrokerView: React.FC<{ currentUser: User }> = ({ currentUser }) => {
 
   const filteredSales = (sales || []).filter(s => s.itemName?.toLowerCase().includes(searchTerm.toLowerCase()));
   
-  // Cast to BrokerSale[] to fix iterator and reduce errors
   const itemPriceHistory = (filteredSales as BrokerSale[]).reduce((acc, curr) => {
     const name = (curr.itemName || "UNKNOWN").toUpperCase();
     if (!acc[name]) acc[name] = [];
@@ -834,6 +1332,7 @@ interface TraderListing {
   itemName: string;
   description: string;
   cost: number;
+  currency: 'TE' | 'DC Cash';
   timestamp: string;
 }
 
@@ -848,12 +1347,16 @@ const VeilWrightTrader: React.FC<{ currentUser: User }> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<'manifest' | 'market'>('market');
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // Market States
   const [marketListings, setMarketListings] = useState<TraderListing[]>(() => {
     const saved = localStorage.getItem('veil_trader_listings');
     return saved ? JSON.parse(saved) : [];
   });
-  const [marketForm, setMarketForm] = useState({ itemName: '', description: '', cost: 0 });
+  const [marketForm, setMarketForm] = useState<{itemName: string, description: string, cost: number, currency: 'TE' | 'DC Cash'}>({ 
+    itemName: '', 
+    description: '', 
+    cost: 0, 
+    currency: 'TE' 
+  });
 
   useEffect(() => {
     (window as any).aistudio?.hasSelectedApiKey().then(setHasApiKey);
@@ -894,13 +1397,7 @@ const VeilWrightTrader: React.FC<{ currentUser: User }> = ({ currentUser }) => {
         }
       });
 
-      const messages = [
-        "Weaving the threads of destiny...",
-        "Manifesting visual echoes from the void...",
-        "Stabilizing the dimensional rift...",
-        "Polishing the chronological lens...",
-        "Finalizing the Veil Wright's vision..."
-      ];
+      const messages = ["Weaving threads...", "Manifesting echoes...", "Stabilizing rift...", "Polishing lens...", "Finalizing vision..."];
       let msgIdx = 0;
 
       while (!op.done) {
@@ -917,9 +1414,7 @@ const VeilWrightTrader: React.FC<{ currentUser: User }> = ({ currentUser }) => {
       setPreviousOp(op);
     } catch (err: any) {
       console.error(err);
-      if (err.message?.includes("Requested entity was not found")) {
-        setHasApiKey(false);
-      }
+      if (err.message?.includes("Requested entity was not found")) setHasApiKey(false);
     } finally {
       setLoading(false);
     }
@@ -928,174 +1423,76 @@ const VeilWrightTrader: React.FC<{ currentUser: User }> = ({ currentUser }) => {
   const extend = async () => {
     if (!previousOp || !prompt) return;
     setLoading(true);
-    setLoadingMessage('Extending the Chronicled Path...');
-    
+    setLoadingMessage('Extending path...');
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       let op = await ai.models.generateVideos({
         model: 'veo-3.1-generate-preview',
         prompt: prompt,
         video: previousOp.response?.generatedVideos?.[0]?.video,
-        config: {
-          numberOfVideos: 1,
-          resolution: '720p',
-          aspectRatio: '16:9'
-        }
+        config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '16:9' }
       });
-
       while (!op.done) {
         await new Promise(resolve => setTimeout(resolve, 10000));
         op = await ai.operations.getVideosOperation({ operation: op });
       }
-
       const downloadLink = op.response?.generatedVideos?.[0]?.video?.uri;
       const resp = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
       const blob = await resp.blob();
       setGeneratedVideo(URL.createObjectURL(blob));
       setPreviousOp(op);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   const handlePostItem = () => {
-    if (!marketForm.itemName || marketForm.cost <= 0) {
-      alert("Please provide a valid item name and cost.");
-      return;
-    }
+    if (!marketForm.itemName || marketForm.cost <= 0) return;
     const newListing: TraderListing = {
       id: Date.now().toString(),
       sellerName: currentUser.username,
       itemName: marketForm.itemName,
       description: marketForm.description,
       cost: marketForm.cost,
+      currency: marketForm.currency,
       timestamp: new Date().toISOString()
     };
     const updated = [newListing, ...marketListings];
     setMarketListings(updated);
     localStorage.setItem('veil_trader_listings', JSON.stringify(updated));
-    setMarketForm({ itemName: '', description: '', cost: 0 });
-    alert("Item listed successfully.");
-  };
-
-  const handlePingSeller = (listing: TraderListing) => {
-    alert(`Neural ping transmitted to ${listing.sellerName}. They have been notified of your interest in "${listing.itemName}".`);
+    setMarketForm({ itemName: '', description: '', cost: 0, currency: 'TE' });
   };
 
   return (
     <div className="h-full flex flex-col space-y-6 animate-fadeIn overflow-hidden">
       <div className="flex justify-between items-center shrink-0">
-        <div>
-          <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Veil Wright Trader</h2>
-          <p className="text-purple-400 text-[10px] font-black uppercase tracking-[0.4em]">Artifact Exchange & Manifestation Hub</p>
-        </div>
+        <div><h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">Veil Wright Trader</h2><p className="text-purple-400 text-[10px] font-black uppercase tracking-[0.4em]">Exchange & Manifestation Hub</p></div>
         <div className="flex bg-black/40 p-1.5 rounded-xl border border-white/5">
-          <button 
-            onClick={() => setActiveTab('market')}
-            className={`px-6 py-2 rounded-lg text-[10px] uppercase font-black transition-all ${activeTab === 'market' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}
-          >
-            P2P Market
-          </button>
-          <button 
-            onClick={() => setActiveTab('manifest')}
-            className={`px-6 py-2 rounded-lg text-[10px] uppercase font-black transition-all ${activeTab === 'manifest' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}
-          >
-            Video Manifestation
-          </button>
+          <button onClick={() => setActiveTab('market')} className={`px-6 py-2 rounded-lg text-[10px] uppercase font-black transition-all ${activeTab === 'market' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}>P2P Market</button>
+          <button onClick={() => setActiveTab('manifest')} className={`px-6 py-2 rounded-lg text-[10px] uppercase font-black transition-all ${activeTab === 'manifest' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}>Video Manifestation</button>
         </div>
       </div>
-
       {activeTab === 'market' ? (
         <div className="flex-1 flex flex-col lg:flex-row gap-8 min-h-0">
-          <div className="w-full lg:w-80 bg-[#0d0d1f]/50 border border-white/5 rounded-3xl p-6 flex flex-col space-y-6 overflow-y-auto custom-scrollbar">
+          <div className="w-full lg:w-80 bg-[#0d0d1f]/50 border border-white/5 rounded-3xl p-6 flex flex-col space-y-6 overflow-y-auto custom-scrollbar shrink-0">
             <h3 className="text-white font-black uppercase text-xs tracking-widest border-b border-white/5 pb-2">Post New Item</h3>
             <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-500 font-black uppercase">Artifact Designation</label>
-                <input 
-                  value={marketForm.itemName} 
-                  onChange={e => setMarketForm({...marketForm, itemName: e.target.value})}
-                  placeholder="e.g. Rare Aura Shard" 
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-500 font-black uppercase">Artifact Description</label>
-                <textarea 
-                  value={marketForm.description} 
-                  onChange={e => setMarketForm({...marketForm, description: e.target.value})}
-                  placeholder="Stats, condition, or history..." 
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm h-32 outline-none focus:border-purple-500 resize-none"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] text-purple-400 font-black uppercase">Cost (Thought Essence)</label>
-                <input 
-                  type="number" 
-                  value={marketForm.cost} 
-                  onChange={e => setMarketForm({...marketForm, cost: Number(e.target.value)})}
-                  placeholder="0" 
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500"
-                />
-              </div>
-              <button 
-                onClick={handlePostItem}
-                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-black py-4 rounded-xl text-[10px] uppercase tracking-widest transition-all shadow-lg"
-              >
-                List Item on Market
-              </button>
+              <input value={marketForm.itemName} onChange={e => setMarketForm({...marketForm, itemName: e.target.value})} placeholder="Artifact Name" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none" />
+              <textarea value={marketForm.description} onChange={e => setMarketForm({...marketForm, description: e.target.value})} placeholder="Description" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm h-32 outline-none resize-none" />
+              <input type="number" value={marketForm.cost} onChange={e => setMarketForm({...marketForm, cost: Number(e.target.value)})} placeholder="Cost" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none" />
+              <select value={marketForm.currency} onChange={e => setMarketForm({...marketForm, currency: e.target.value as any})} className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none">
+                <option value="TE">TE</option><option value="DC Cash">DC Cash</option>
+              </select>
+              <button onClick={handlePostItem} className="w-full bg-purple-600 text-white font-black py-4 rounded-xl text-[10px] uppercase tracking-widest shadow-lg">List Item</button>
             </div>
           </div>
-
           <div className="flex-1 bg-black/20 border border-white/5 rounded-[40px] p-8 overflow-y-auto custom-scrollbar">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {marketListings.length === 0 ? (
-                <div className="col-span-full py-20 flex flex-col items-center justify-center opacity-10">
-                  <i className="fas fa-handshake-slash text-9xl mb-4"></i>
-                  <p className="text-xl font-black uppercase tracking-widest">Marketplace Silent</p>
+              {marketListings.map(listing => (
+                <div key={listing.id} className="bg-[#16162a] border border-white/5 rounded-3xl p-6 hover:border-purple-500/30 transition-all flex flex-col group relative">
+                  <div className="flex justify-between items-start mb-4"><h4 className="text-white font-black uppercase italic text-lg truncate">{listing.itemName}</h4><p className="text-purple-400 font-black text-xl italic">{listing.cost} {listing.currency}</p></div>
+                  <p className="text-gray-400 text-xs italic font-serif leading-relaxed line-clamp-4 flex-1">"{listing.description}"</p>
+                  <button onClick={() => alert('Pinged!')} className="mt-6 w-full bg-white/5 hover:bg-purple-600 text-gray-500 hover:text-white border border-white/10 py-3 rounded-xl text-[9px] font-black uppercase">Ping Seller</button>
                 </div>
-              ) : (
-                marketListings.map(listing => (
-                  <div key={listing.id} className="bg-[#16162a] border border-white/5 rounded-3xl p-6 hover:border-purple-500/30 transition-all flex flex-col relative group">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h4 className="text-white font-black uppercase italic text-lg tracking-tight">{listing.itemName}</h4>
-                        <p className="text-[9px] text-gray-600 font-bold uppercase tracking-widest mt-1">Seller: {listing.sellerName}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-purple-400 font-black text-xl italic">{listing.cost.toLocaleString()}</p>
-                        <p className="text-[8px] text-gray-700 uppercase">Thought Essence</p>
-                      </div>
-                    </div>
-                    <p className="text-gray-400 text-xs italic font-serif leading-relaxed line-clamp-4 flex-1">
-                      "{listing.description || 'No additional details provided by seller.'}"
-                    </p>
-                    <div className="mt-6 flex gap-2">
-                      <button 
-                        onClick={() => handlePingSeller(listing)}
-                        className="flex-1 bg-white/5 hover:bg-purple-600 text-gray-500 hover:text-white border border-white/10 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                      >
-                        <i className="fas fa-bell mr-2"></i>
-                        Ping Seller
-                      </button>
-                      {listing.sellerName === currentUser.username && (
-                        <button 
-                          onClick={() => {
-                            const updated = marketListings.filter(l => l.id !== listing.id);
-                            setMarketListings(updated);
-                            localStorage.setItem('veil_trader_listings', JSON.stringify(updated));
-                          }}
-                          className="bg-red-900/10 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/20 px-4 rounded-xl text-[9px] font-black uppercase transition-all"
-                        >
-                          <i className="fas fa-trash-alt"></i>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
+              ))}
             </div>
           </div>
         </div>
@@ -1103,58 +1500,22 @@ const VeilWrightTrader: React.FC<{ currentUser: User }> = ({ currentUser }) => {
         <div className="flex-1 flex flex-col lg:flex-row gap-8 min-h-0">
           {!hasApiKey ? (
             <div className="w-full flex flex-col items-center justify-center p-12 text-center space-y-8 animate-fadeIn">
-              <div className="w-24 h-24 bg-purple-600 rounded-3xl flex items-center justify-center shadow-2xl animate-pulse">
-                 <i className="fas fa-key text-4xl text-white"></i>
-              </div>
-              <div>
-                <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter mb-4">Veil Wright Authorization</h2>
-                <p className="text-gray-400 max-w-md mx-auto mb-8 text-sm leading-relaxed">
-                  The Veil Wright requires a paid API key to manifest video chronicles. 
-                  Ensure billing is enabled as per the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="text-purple-400 hover:underline">official documentation</a>.
-                </p>
-                <button onClick={openKeyDialog} className="bg-purple-600 hover:bg-purple-500 text-white font-black px-12 py-4 rounded-2xl uppercase tracking-widest transition-all shadow-lg">Authenticate with API Key</button>
-              </div>
+              <div className="w-24 h-24 bg-purple-600 rounded-3xl flex items-center justify-center shadow-2xl animate-pulse"><i className="fas fa-key text-4xl text-white"></i></div>
+              <button onClick={openKeyDialog} className="bg-purple-600 text-white font-black px-12 py-4 rounded-2xl uppercase tracking-widest shadow-lg">Authenticate with API Key</button>
             </div>
           ) : (
             <>
-              <div className="w-full lg:w-96 bg-[#0d0d1f]/50 border border-white/5 rounded-3xl p-8 flex flex-col space-y-8 overflow-y-auto custom-scrollbar shrink-0">
-                <div className="space-y-4">
-                  <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Ritual Directive (Prompt)</label>
-                  <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Manifest a cinematic sequence..." className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm h-32 outline-none focus:border-purple-500 transition-all resize-none" />
+              <div className="w-full lg:w-96 bg-[#0d0d1f]/50 border border-white/5 rounded-3xl p-8 flex flex-col space-y-8 shrink-0">
+                <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Ritual Directive..." className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm h-32 outline-none focus:border-purple-500 resize-none" />
+                <div onClick={() => fileInput.current?.click()} className="aspect-video bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center cursor-pointer hover:bg-white/10 overflow-hidden">
+                  {startImage ? <img src={startImage} className="w-full h-full object-cover" /> : <p className="text-[8px] text-gray-500 uppercase font-black">Starting Frame</p>}
+                  <input ref={fileInput} type="file" className="hidden" onChange={handleFile} />
                 </div>
-                <div className="space-y-4">
-                  <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Source Image (Optional)</label>
-                  <div onClick={() => fileInput.current?.click()} className="aspect-video bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center cursor-pointer hover:bg-white/10 overflow-hidden">
-                    {startImage ? <img src={startImage} className="w-full h-full object-cover" /> : <div className="text-center"><i className="fas fa-image text-2xl text-gray-700 mb-2"></i><p className="text-[8px] text-gray-500 uppercase font-black">Upload Starting Frame</p></div>}
-                    <input ref={fileInput} type="file" className="hidden" accept="image/*" onChange={handleFile} />
-                  </div>
-                </div>
-                <div className="pt-4 space-y-4">
-                  <button onClick={generate} disabled={loading || !prompt} className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-20 text-white font-black py-4 rounded-xl uppercase text-[10px] tracking-widest transition-all shadow-lg flex items-center justify-center gap-2">
-                    {loading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic"></i>} Manifest Timeline
-                  </button>
-                  {previousOp && (
-                    <button onClick={extend} disabled={loading} className="w-full border border-purple-500/30 text-purple-400 hover:bg-purple-500 hover:text-white font-black py-4 rounded-xl uppercase text-[10px] tracking-widest transition-all flex items-center justify-center gap-2">
-                      <i className="fas fa-forward"></i> Extend +7s
-                    </button>
-                  )}
-                </div>
+                <button onClick={generate} disabled={loading || !prompt} className="w-full bg-purple-600 text-white font-black py-4 rounded-xl uppercase text-[10px] tracking-widest shadow-lg">Manifest Timeline</button>
+                {previousOp && <button onClick={extend} disabled={loading} className="w-full border border-purple-500/30 text-purple-400 py-4 rounded-xl uppercase text-[10px] tracking-widest">Extend +7s</button>}
               </div>
               <div className="flex-1 bg-black/40 border border-white/5 rounded-[40px] flex items-center justify-center relative overflow-hidden">
-                 <div className="scanline-overlay opacity-10"></div>
-                 {loading ? (
-                   <div className="flex flex-col items-center space-y-6 animate-pulse">
-                      <div className="w-20 h-20 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
-                      <p className="text-white font-black uppercase tracking-[0.3em] text-xs">{loadingMessage}</p>
-                   </div>
-                 ) : generatedVideo ? (
-                   <video src={generatedVideo} controls autoPlay loop className="w-full h-full object-contain" />
-                 ) : (
-                   <div className="flex flex-col items-center opacity-10">
-                      <i className="fas fa-film text-[120px] mb-6"></i>
-                      <p className="text-2xl font-black uppercase tracking-widest">Ritual Chamber Empty</p>
-                   </div>
-                 )}
+                 {loading ? <p className="text-white font-black uppercase tracking-[0.3em] text-xs">{loadingMessage}</p> : generatedVideo ? <video src={generatedVideo} controls autoPlay loop className="w-full h-full object-contain" /> : <i className="fas fa-film text-[120px] opacity-10"></i>}
               </div>
             </>
           )}
@@ -1176,263 +1537,87 @@ const LeagueFinderView: React.FC<{
   const [previewLeague, setPreviewLeague] = useState<League | null>(null);
 
   const mockAllLeagues: League[] = [
-    { id: 'm1', name: 'Justice Alliance', memberCount: 150, platform: 'PC', role: 'Member', description: 'A massive league for heroes of all power levels.' },
-    { id: 'm2', name: 'Doom Syndicate', memberCount: 45, platform: 'XBOX', role: 'Member', description: 'Chaos and destruction are our only goals.' },
-    { id: 'm3', name: 'Lantern Corp', memberCount: 88, platform: 'PS', role: 'Member', description: 'In brightest day, in blackest night...' },
+    { id: 'm1', name: 'Justice Alliance', memberCount: 150, platform: 'PC', role: 'Member', description: 'Large hero league.' },
+    { id: 'm2', name: 'Doom Syndicate', memberCount: 45, platform: 'XBOX', role: 'Member', description: 'Chaos goals.' },
+    { id: 'm3', name: 'Lantern Corp', memberCount: 88, platform: 'PS', role: 'Member', description: 'In brightest day...' },
     ...user.leagues
   ];
 
-  const filteredLeagues = mockAllLeagues.filter(l => 
-    l.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredLeagues = mockAllLeagues.filter(l => l.name.toLowerCase().includes(search.toLowerCase()));
+  const createdLeaguesCount = user.leagues.filter(l => l.role === 'Leader').length;
 
   return (
     <div className="h-full flex flex-col space-y-8 animate-fadeIn">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-[#0d0d1f]/30 p-8 rounded-3xl border border-white/5 shadow-xl">
-        <div className="flex-1">
-          <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">League Multi-Verse</h2>
-          <p className="text-purple-400 text-xs font-bold uppercase tracking-widest mt-1">Deploy, Discover, and Command across platforms</p>
-        </div>
-
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-[#0d0d1f]/30 p-8 rounded-3xl border border-white/5">
+        <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">League Multi-Verse</h2>
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex bg-black/40 p-1.5 rounded-2xl border border-white/5">
-            {user.leagues.map((league, idx) => (
-              <button
-                key={league.id}
-                onClick={() => onSwitchLeague(idx)}
-                className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  activeLeagueIndex === idx ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                {league.name}
-              </button>
-            ))}
-          </div>
-
           <button 
-            disabled={user.leagues.length >= 3}
-            onClick={() => setShowCreator(true)}
-            className="bg-green-600 hover:bg-green-500 disabled:opacity-20 disabled:cursor-not-allowed text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg flex items-center gap-2"
+            disabled={user.leagues.length >= 3 || createdLeaguesCount >= 1} 
+            onClick={() => setShowCreator(true)} 
+            className="bg-green-600 disabled:opacity-30 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20"
           >
-            <i className="fas fa-plus"></i>
             Deploy New Sanctuary ({user.leagues.length}/3)
           </button>
         </div>
       </div>
-
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8 overflow-hidden min-h-0">
-        <div className="lg:col-span-2 flex flex-col space-y-4 overflow-hidden">
-          <div className="relative group shrink-0">
-             <i className="fas fa-search absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-purple-400 transition-colors"></i>
-             <input 
-               value={search}
-               onChange={e => setSearch(e.target.value)}
-               placeholder="Scan for League Signatures..." 
-               className="w-full bg-[#0d0d1f]/50 border border-white/5 rounded-2xl py-5 pl-14 pr-6 text-white text-sm outline-none focus:border-purple-500/50 transition-all shadow-2xl"
-             />
-          </div>
-
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8 overflow-hidden">
+        <div className="lg:col-span-2 flex flex-col space-y-4">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Scan for League Signatures..." className="w-full bg-[#0d0d1f]/50 border border-white/5 rounded-2xl py-5 px-6 text-white text-sm outline-none shadow-2xl" />
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-4">
              {filteredLeagues.map(l => (
-               <div 
-                 key={l.id}
-                 className="group bg-[#0d0d1f]/50 border border-white/5 rounded-2xl p-6 hover:bg-[#16162a] transition-all flex items-center justify-between"
-               >
-                 <div className="flex items-center gap-6">
-                    <div className="w-14 h-14 bg-white/5 rounded-xl flex items-center justify-center text-2xl text-purple-400 group-hover:bg-purple-600 group-hover:text-white transition-all">
-                       <i className="fas fa-shield-halved"></i>
-                    </div>
-                    <div>
-                       <h4 className="text-white font-black uppercase italic text-lg tracking-tight">{l.name}</h4>
-                       <div className="flex items-center gap-4 mt-1">
-                          <span className="text-[10px] text-gray-500 uppercase font-black tracking-widest"><i className="fas fa-users mr-1"></i> {l.memberCount} Members</span>
-                          <span className="text-[10px] text-gray-500 uppercase font-black tracking-widest"><i className="fas fa-gamepad mr-1"></i> {l.platform}</span>
-                       </div>
-                    </div>
-                 </div>
-                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                    <button 
-                      onClick={() => setPreviewLeague(l)}
-                      className="text-[10px] font-black uppercase text-purple-400 hover:text-white px-4 py-2"
-                    >
-                      Scan Details
-                    </button>
-                    <button 
-                      onClick={() => {
-                        const idx = user.leagues.findIndex(ul => ul.id === l.id);
-                        if (idx !== -1) {
-                          onSwitchLeague(idx);
-                          onGoHome();
-                        } else {
-                          alert("Membership request transmitted. High command will review your status.");
-                        }
-                      }}
-                      className="bg-purple-600/10 hover:bg-purple-600 text-purple-400 hover:text-white border border-purple-500/30 px-5 py-2 rounded-xl text-[10px] font-black uppercase"
-                    >
-                      {user.leagues.some(ul => ul.id === l.id) ? 'Switch to Hub' : 'Request Join'}
-                    </button>
-                 </div>
+               <div key={l.id} className="group bg-[#0d0d1f]/50 border border-white/5 rounded-2xl p-6 hover:bg-[#16162a] transition-all flex items-center justify-between">
+                 <div><h4 className="text-white font-black uppercase italic text-lg">{l.name}</h4><p className="text-[10px] text-gray-500">{l.memberCount} Members • {l.platform}</p></div>
+                 <button onClick={() => setPreviewLeague(l)} className="bg-purple-600/10 hover:bg-purple-600 text-purple-400 hover:text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase">Scan Details</button>
                </div>
              ))}
           </div>
         </div>
-
-        <div className="hidden lg:flex flex-col bg-[#0d0d1f]/50 border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+        <div className="hidden lg:flex flex-col bg-[#0d0d1f]/50 border border-white/5 rounded-3xl overflow-hidden shadow-2xl p-8">
            {previewLeague ? (
-             <div className="flex flex-col h-full animate-fadeIn">
-                <div 
-                  className="h-48 bg-cover bg-center relative"
-                  style={{ backgroundImage: `url(${previewLeague.background || 'https://images.unsplash.com/photo-1614728263952-84ea206f99b6?q=80&w=600'})` }}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d1f] to-transparent"></div>
-                  <div className="absolute -bottom-8 left-8">
-                     <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center text-3xl shadow-2xl border-2 border-purple-400/30">
-                        <i className="fas fa-ghost text-white"></i>
-                     </div>
-                  </div>
-                </div>
-                <div className="p-8 pt-12 space-y-6">
-                   <div>
-                     <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">{previewLeague.name}</h3>
-                     <p className="text-purple-400 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Official Directive Status</p>
-                   </div>
-                   <p className="text-gray-400 text-sm leading-relaxed font-serif italic">
-                     "{previewLeague.description || 'A mysterious gathering of champions whose goals are known only to their leadership.'}"
-                   </p>
-                   <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                         <span className="text-[9px] text-gray-500 uppercase font-black block mb-1">Force Strength</span>
-                         <span className="text-white font-black">{previewLeague.memberCount} Heroes</span>
-                      </div>
-                      <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                         <span className="text-[9px] text-gray-500 uppercase font-black block mb-1">Deployment Platform</span>
-                         <span className="text-white font-black">{previewLeague.platform}</span>
-                      </div>
-                   </div>
-                </div>
-                <div className="mt-auto p-8 border-t border-white/5">
-                   <button 
-                     onClick={() => setPreviewLeague(null)}
-                     className="w-full bg-white/5 hover:bg-white/10 text-gray-500 hover:text-white font-black py-4 rounded-xl text-[10px] uppercase transition-all"
-                   >
-                     Close Transmission
-                   </button>
-                </div>
+             <div className="animate-fadeIn">
+                <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">{previewLeague.name}</h3>
+                <p className="text-gray-400 text-sm mt-4 italic">"{previewLeague.description || 'No info.'}"</p>
+                <button onClick={() => setPreviewLeague(null)} className="mt-8 w-full bg-white/5 text-gray-500 py-4 rounded-xl text-[10px] uppercase">Close Transmission</button>
              </div>
-           ) : (
-             <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-30">
-                <i className="fas fa-fingerprint text-6xl mb-6 text-purple-400"></i>
-                <h4 className="text-xl font-black uppercase italic text-white mb-2">Biometric Scan Required</h4>
-                <p className="text-xs uppercase tracking-widest leading-loose">Select a league signature to decrypt detailed intelligence.</p>
-             </div>
-           )}
+           ) : <p className="text-center opacity-30 text-xs uppercase tracking-widest mt-20">Select a signature</p>}
         </div>
       </div>
-
-      {showCreator && (
-        <LeagueCreator 
-          onSave={onCreateLeague} 
-          onClose={() => setShowCreator(false)} 
-        />
-      )}
+      {showCreator && <LeagueCreator onSave={onCreateLeague} onClose={() => setShowCreator(false)} />}
     </div>
   );
 };
 
 const LeagueCreator: React.FC<{ onSave: (l: League) => void, onClose: () => void }> = ({ onSave, onClose }) => {
-  const [form, setForm] = useState<Partial<League>>({
-    name: '',
-    description: '',
-    platform: 'PC',
-    role: 'Leader',
-    memberCount: 1
-  });
-  
+  const [form, setForm] = useState<Partial<League>>({ name: '', description: '', platform: 'PC' });
   const handleSave = () => {
     if (!form.name) return;
-    onSave({
-      ...form,
-      id: Date.now().toString(),
-      memberCount: 1,
-      role: 'Leader'
-    } as League);
+    onSave({ ...form, id: 'l_custom_' + Date.now(), memberCount: 1, role: 'Leader' } as League);
     onClose();
   };
-
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-8 bg-black/90 backdrop-blur-xl animate-fadeIn">
-      <div className="bg-[#0d0d1f] border border-green-500/30 rounded-3xl w-full max-w-xl overflow-hidden shadow-[0_0_100px_rgba(34,197,94,0.1)] flex flex-col animate-slideUp">
-        <div className="p-8 border-b border-white/5 flex justify-between items-center">
-          <div>
-            <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Initiate New Sanctuary</h3>
-            <p className="text-green-400 text-[10px] font-bold uppercase tracking-[0.2em]">Deployment Protocol v3.1</p>
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white transition-all"><i className="fas fa-times text-2xl"></i></button>
-        </div>
-
-        <div className="p-8 space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">League Designation</label>
-            <input 
-              value={form.name} 
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g. Shadow Vanguard" 
-              className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm outline-none focus:border-green-500 transition-all"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Directive Statement</label>
-            <textarea 
-              value={form.description} 
-              onChange={e => setForm({ ...form, description: e.target.value })}
-              placeholder="Describe your league's mission..." 
-              className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm h-32 outline-none focus:border-green-500 transition-all resize-none"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Primary Deployment Platform</label>
-            <select 
-              value={form.platform} 
-              onChange={e => setForm({ ...form, platform: e.target.value })}
-              className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm outline-none"
-            >
-              <option value="PC">PC - Master Race</option>
-              <option value="PS">PlayStation - Console Collective</option>
-              <option value="XBOX">XBOX - Green Machine</option>
-              <option value="SWITCH">Switch - Handheld Heroes</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="p-8 border-t border-white/5 flex gap-4">
-          <button 
-            onClick={handleSave}
-            disabled={!form.name}
-            className="flex-1 bg-green-600 disabled:opacity-20 text-white font-black py-4 rounded-xl text-xs uppercase tracking-widest shadow-lg hover:bg-green-500 transition-all"
-          >
-            Confirm Deployment
-          </button>
-          <button 
-            onClick={onClose}
-            className="px-8 bg-white/5 text-gray-500 font-black py-4 rounded-xl text-xs uppercase tracking-widest hover:text-white transition-all"
-          >
-            Abort
-          </button>
-        </div>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-8 bg-black/90 backdrop-blur-xl">
+      <div className="bg-[#0d0d1f] border border-green-500/30 rounded-3xl w-full max-w-xl p-8 animate-slideUp space-y-6">
+        <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Initiate New Sanctuary</h3>
+        <p className="text-[10px] text-gray-500 uppercase font-black">Limited to 1 Created Sanctuary Per Operative</p>
+        <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="League Designation" className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm outline-none focus:border-green-500" />
+        <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Directive Statement" className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm h-32 outline-none focus:border-green-500 resize-none" />
+        <button onClick={handleSave} className="w-full bg-green-600 text-white font-black py-4 rounded-xl uppercase shadow-lg shadow-green-900/40">Confirm Deployment</button>
       </div>
     </div>
   );
 };
 
-const ProfileView: React.FC<{ user: User, onUpdateUser: (data: Partial<User>) => void }> = ({ user, onUpdateUser }) => {
-  const [showFriends, setShowFriends] = useState(false);
-  const [friendQuery, setFriendQuery] = useState('');
+const ProfileView: React.FC<{ 
+  user: User, 
+  viewingUserId: string | null, 
+  activeLeagueIndex: number,
+  onUpdateUser: (data: Partial<User>) => void, 
+  onViewUser: (id: string) => void,
+  onResetView: () => void
+}> = ({ user, viewingUserId, activeLeagueIndex, onUpdateUser, onViewUser, onResetView }) => {
   const [userProfileCharacters, setUserProfileCharacters] = useState<any[]>([]);
   const [showCharacterCreator, setShowCharacterCreator] = useState(false);
-  const [isEditingCodename, setIsEditingCodename] = useState(false);
-  const [tempUsername, setTempUsername] = useState(user.username);
+  const [inspectingChar, setInspectingChar] = useState<any | null>(null);
   
   const [newCharName, setNewCharName] = useState('');
   const [selectedCaseId, setSelectedCaseId] = useState('');
@@ -1444,284 +1629,249 @@ const ProfileView: React.FC<{ user: User, onUpdateUser: (data: Partial<User>) =>
   const avatarInput = useRef<HTMLInputElement>(null);
   const bannerInput = useRef<HTMLInputElement>(null);
 
+  const MOCK_OTHER_USERS: Record<string, any> = {
+    'f1': { id: 'f1', username: 'Slipthought', thoughtEssence: 5200, avatar: null, leagues: [{ id: 'l1', name: 'The Ashen Veil', role: 'Member', platform: 'PC' }] },
+    'f2': { id: 'f2', username: 'VeilWright', thoughtEssence: 8900, avatar: null, leagues: [{ id: 'l1', name: 'The Ashen Veil', role: 'Member', platform: 'PS' }] },
+    'f3': { id: 'f3', username: 'ChronoKeeper', thoughtEssence: 15400, avatar: null, leagues: [{ id: 'l1', name: 'The Ashen Veil', role: 'Member', platform: 'PC' }] }
+  };
+
+  const isSelf = !viewingUserId || viewingUserId === user.id;
+  const targetUser = isSelf ? user : (MOCK_OTHER_USERS[viewingUserId!] || { ...INITIAL_USER, username: 'Unknown Operative', id: viewingUserId, leagues: [] });
+
   useEffect(() => {
     const savedCases = localStorage.getItem('league_archive_cases') || '[]';
-    const parsedCases = JSON.parse(savedCases);
-    setAllCases(parsedCases);
+    setAllCases(JSON.parse(savedCases));
 
     const savedSuits = localStorage.getItem('dorno_suits') || '{}';
     setAllSuits(JSON.parse(savedSuits));
 
-    const savedChars = localStorage.getItem(`profile_chars_${user.id}`) || '[]';
+    const savedChars = localStorage.getItem(`profile_chars_${targetUser.id}`) || '[]';
     setUserProfileCharacters(JSON.parse(savedChars));
-  }, [user.id]);
+  }, [targetUser.id]);
 
-  const handleCreateProfileCharacter = () => {
-    if (!newCharName.trim()) return;
+  const handleUpdateAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isSelf) return;
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => onUpdateUser({ avatar: reader.result as string });
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleUpdateBanner = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isSelf) return;
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        localStorage.setItem(`profile_banner_${user.id}`, result);
+        onUpdateUser({}); 
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleCreateCharacter = () => {
+    if (!newCharName.trim() || !isSelf) return;
     const newChar = {
       id: Date.now().toString(),
       name: newCharName,
       linkedCaseId: selectedCaseId,
-      linkedSuitId: selectedSuitId,
-      timestamp: new Date().toISOString()
+      linkedSuitId: selectedSuitId
     };
     const updated = [...userProfileCharacters, newChar];
     setUserProfileCharacters(updated);
     localStorage.setItem(`profile_chars_${user.id}`, JSON.stringify(updated));
-    
     setNewCharName('');
     setSelectedCaseId('');
     setSelectedSuitId('');
     setShowCharacterCreator(false);
   };
 
-  const deleteProfileCharacter = (id: string) => {
-    const updated = userProfileCharacters.filter(c => c.id !== id);
-    setUserProfileCharacters(updated);
-    localStorage.setItem(`profile_chars_${user.id}`, JSON.stringify(updated));
-  };
+  const isFriend = user.friends.some(f => f.id === targetUser.id);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>, field: 'avatar' | 'profileBanner') => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (field === 'avatar') {
-          onUpdateUser({ avatar: reader.result as string });
-        } else {
-          localStorage.setItem('user_profile_banner', reader.result as string);
-          onUpdateUser({}); 
-        }
-      };
-      reader.readAsDataURL(file);
+  const handleToggleFriend = () => {
+    if (isSelf) return;
+    if (isFriend) {
+      const updated = user.friends.filter(f => f.id !== targetUser.id);
+      onUpdateUser({ friends: updated });
+      alert(`Connection terminated with ${targetUser.username}.`);
+    } else {
+      const newFriend: Friend = { id: targetUser.id, username: targetUser.username, isOnline: true };
+      const updated = [...user.friends, newFriend];
+      onUpdateUser({ friends: updated });
+      alert(`Neural link established with ${targetUser.username}!`);
     }
   };
 
-  const deleteFriend = (friendId: string) => {
-    const updatedFriends = user.friends.filter(f => f.id !== friendId);
-    onUpdateUser({ friends: updatedFriends });
+  const handleSendInvite = (league: League) => {
+    alert(`Encrypted invitation to ${league.name} dispatched to ${targetUser.username}.`);
   };
 
-  const sendFriendRequest = () => {
-    if (!friendQuery.trim()) return;
-    alert(`Friend request transmitted to: ${friendQuery}`);
-    setFriendQuery('');
-  };
-
-  const saveCodename = () => {
-    onUpdateUser({ username: tempUsername });
-    setIsEditingCodename(false);
-  };
-
-  const currentBanner = localStorage.getItem('user_profile_banner') || 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2000&auto=format&fit=crop';
+  const banner = localStorage.getItem(`profile_banner_${targetUser.id}`) || 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2000&auto=format&fit=crop';
+  const myLeaguesWhereLeader = user.leagues.filter(l => l.role === 'Leader');
 
   return (
-    <div className="h-full flex flex-col space-y-8 animate-fadeIn overflow-y-auto pr-2 custom-scrollbar">
-      <div className="relative group">
+    <div className="h-full flex flex-col space-y-8 overflow-y-auto pr-2 custom-scrollbar">
+      {!isSelf && (
+        <button onClick={onResetView} className="self-start text-[10px] font-black uppercase tracking-[0.3em] text-purple-400 hover:text-white transition-all flex items-center gap-2 px-8">
+          <i className="fas fa-arrow-left"></i> Return to Neural Hub
+        </button>
+      )}
+
+      <div className="relative group shrink-0 mx-8">
         <div 
           className="h-64 w-full rounded-3xl bg-cover bg-center border border-white/10 relative overflow-hidden shadow-2xl"
-          style={{ backgroundImage: `url(${currentBanner})` }}
+          style={{ backgroundImage: `url(${banner})` }}
         >
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-          <button 
-            onClick={() => bannerInput.current?.click()}
-            className="absolute top-4 right-4 bg-black/50 hover:bg-black/80 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl backdrop-blur-md border border-white/10 opacity-0 group-hover:opacity-100 transition-all"
-          >
-            Update Banner
-          </button>
-          <input ref={bannerInput} type="file" className="hidden" accept="image/*" onChange={(e) => handleFile(e, 'profileBanner')} />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+          {isSelf && (
+            <button 
+              onClick={() => bannerInput.current?.click()}
+              className="absolute top-4 right-4 bg-black/50 hover:bg-black/80 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl backdrop-blur-md border border-white/10 opacity-0 group-hover:opacity-100 transition-all"
+            >
+              Update Banner
+            </button>
+          )}
+          <input ref={bannerInput} type="file" className="hidden" accept="image/*" onChange={handleUpdateBanner} />
         </div>
 
-        <div className="absolute -bottom-16 left-12 flex items-end gap-6">
-          <div className="relative group/avatar">
-            <div className="w-32 h-32 rounded-3xl bg-indigo-600 border-4 border-[#0b0b1a] overflow-hidden shadow-2xl relative">
-              {user.avatar ? (
-                <img src={user.avatar} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-4xl font-black text-white">
-                  {user.username[0]}
-                </div>
-              )}
-            </div>
-            <button 
-              onClick={() => avatarInput.current?.click()}
-              className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-all rounded-3xl text-white"
-            >
-              <i className="fas fa-camera"></i>
-            </button>
-            <input ref={avatarInput} type="file" className="hidden" accept="image/*" onChange={(e) => handleFile(e, 'avatar')} />
+        <div className="absolute -bottom-12 left-12 flex items-end gap-6">
+          <div onClick={() => isSelf && avatarInput.current?.click()} className={`w-32 h-32 rounded-3xl bg-indigo-600 overflow-hidden border-4 border-[#0b0b1a] shadow-2xl relative group/avatar ${isSelf ? 'cursor-pointer' : ''}`}>
+            {targetUser.avatar ? <img src={targetUser.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-4xl font-black text-white">{targetUser.username[0]}</div>}
+            {isSelf && <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-all text-white"><i className="fas fa-camera"></i></div>}
+            <input ref={avatarInput} type="file" className="hidden" onChange={handleUpdateAvatar} />
           </div>
           <div className="pb-4 flex-1">
-            <div className="flex items-center gap-3">
-              {isEditingCodename ? (
-                <div className="flex items-center gap-2">
-                   <input 
-                    value={tempUsername}
-                    onChange={e => setTempUsername(e.target.value)}
-                    className="bg-black/40 border border-purple-500/50 rounded-xl px-4 py-2 text-white text-2xl font-black italic outline-none"
-                   />
-                   <button onClick={saveCodename} className="bg-green-600 text-white p-2 rounded-lg text-xs font-bold">SAVE</button>
-                </div>
-              ) : (
-                <>
-                  <h2 className="text-4xl font-black text-white uppercase italic tracking-tighter">{user.username}</h2>
-                  <button 
-                    onClick={() => setIsEditingCodename(true)}
-                    className="text-gray-500 hover:text-purple-400 transition-all"
-                  >
-                    <i className="fas fa-pen-to-square text-sm"></i>
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="bg-purple-600/20 text-purple-400 text-[9px] font-black px-2 py-0.5 rounded border border-purple-500/30 uppercase tracking-widest">
-                VERIFIED VANGUARD
-              </span>
-              <span className="bg-black/40 text-gray-500 text-[9px] font-black px-2 py-0.5 rounded border border-white/5 uppercase tracking-widest">
-                LVL 4 CLEARANCE
-              </span>
+            <h2 className="text-4xl font-black text-white italic uppercase tracking-tighter">{targetUser.username}</h2>
+            <div className="flex gap-2 mt-1">
+              <span className="bg-purple-600/20 text-purple-400 text-[9px] font-black px-2 py-0.5 rounded border border-purple-500/30 uppercase tracking-widest">VERIFIED OPERATIVE</span>
+              <span className="bg-black/40 text-gray-500 text-[9px] font-black px-2 py-0.5 rounded border border-white/5 uppercase tracking-widest">{targetUser.thoughtEssence?.toLocaleString()} TE</span>
             </div>
           </div>
+          {!isSelf && (
+            <div className="pb-6 flex gap-3">
+              <button 
+                onClick={handleToggleFriend}
+                className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg ${isFriend ? 'bg-red-600/20 text-red-500 border border-red-500/30' : 'bg-green-600 text-white shadow-green-900/40'}`}
+              >
+                <i className={`fas ${isFriend ? 'fa-user-minus' : 'fa-user-plus'} mr-2`}></i>
+                {isFriend ? 'Terminate Link' : 'Establish Neural Link'}
+              </button>
+              {myLeaguesWhereLeader.length > 0 && (
+                <div className="relative group/inv">
+                  <button className="bg-purple-600 text-white px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg flex items-center">
+                    <i className="fas fa-envelope-open-text mr-2"></i> Send League Invite
+                  </button>
+                  <div className="absolute bottom-full mb-2 right-0 bg-[#0d0d1f] border border-purple-500/30 rounded-xl overflow-hidden hidden group-hover/inv:block animate-slideUp min-w-[200px] z-50">
+                    {myLeaguesWhereLeader.map(l => (
+                      <button key={l.id} onClick={() => handleSendInvite(l)} className="w-full text-left px-4 py-3 text-[9px] font-black uppercase text-gray-300 hover:bg-purple-600 hover:text-white transition-all border-b border-white/5 last:border-none">
+                        Invite to: {l.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="pt-16 grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20">
+      <div className="pt-12 grid grid-cols-1 lg:grid-cols-3 gap-8 px-8 pb-20">
         <div className="space-y-6">
-          <div className="glass p-6 rounded-3xl border-white/5 space-y-4">
-            <h3 className="text-white font-black uppercase text-xs tracking-widest flex items-center gap-2">
-              <i className="fas fa-chart-simple text-purple-400"></i>
-              Account Metrics
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                <p className="text-[10px] text-gray-500 uppercase font-black">Essence</p>
-                <p className="text-xl font-black text-white">{user.thoughtEssence.toLocaleString()}</p>
-              </div>
-              <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                <p className="text-[10px] text-gray-500 uppercase font-black">Active Roster</p>
-                <p className="text-xl font-black text-white">{userProfileCharacters.length}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass p-6 rounded-3xl border-white/5">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-white font-black uppercase text-xs tracking-widest flex items-center gap-2">
-                <i className="fas fa-user-friends text-purple-400"></i>
-                Vanguard Network
-              </h3>
-              <button 
-                onClick={() => setShowFriends(!showFriends)}
-                className="text-[10px] text-purple-400 font-bold uppercase hover:text-white transition-all"
-              >
-                {showFriends ? 'Collapse' : 'Manage List'}
-              </button>
-            </div>
-            
-            {showFriends && (
-              <div className="space-y-4 animate-fadeIn">
-                <div className="flex gap-2">
-                  <input 
-                    value={friendQuery}
-                    onChange={e => setFriendQuery(e.target.value)}
-                    placeholder="Search Username..."
-                    className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white text-[11px] outline-none focus:border-purple-500"
-                  />
-                  <button 
-                    onClick={sendFriendRequest}
-                    className="bg-purple-600 hover:bg-purple-500 text-white p-2 rounded-xl transition-all"
-                    title="Transmit Request"
-                  >
-                    <i className="fas fa-user-plus text-xs"></i>
-                  </button>
-                </div>
-
-                <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
-                  {user.friends.map(friend => (
-                    <div key={friend.id} className="flex items-center justify-between p-3 bg-black/40 rounded-xl border border-white/5 group hover:border-purple-500/30 transition-all">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-indigo-900/40 flex items-center justify-center text-xs font-bold text-white border border-white/5">
-                          {friend.username[0]}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-white">{friend.username}</p>
-                          <p className={`text-[8px] uppercase font-black ${friend.isOnline ? 'text-green-500' : 'text-gray-600'}`}>
-                            {friend.isOnline ? 'Transmitting' : 'Offline'}
-                          </p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => deleteFriend(friend.id)}
-                        className="opacity-0 group-hover:opacity-100 p-2 text-red-500/40 hover:text-red-500 transition-all"
-                        title="Sever Connection"
-                      >
-                        <i className="fas fa-user-minus text-[10px]"></i>
-                      </button>
+           <div className="glass p-6 rounded-3xl border-white/5">
+             <h3 className="text-white font-black uppercase text-xs tracking-widest flex items-center gap-2 mb-6"><i className="fas fa-user-friends text-purple-400"></i>Vanguard Network</h3>
+             <div className="space-y-4">
+                {(isSelf ? user.friends : []).map(f => (
+                  <div key={f.id} className="flex items-center gap-3 p-3 bg-black/20 rounded-xl border border-white/5 group relative overflow-hidden">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-900/40 flex items-center justify-center text-xs font-bold text-white border border-white/5">{f.username[0]}</div>
+                    <div className="flex-1 min-w-0">
+                      <p onClick={() => onViewUser(f.id)} className="text-xs font-bold text-white cursor-pointer hover:text-purple-400 transition-colors truncate">{f.username}</p>
+                      <p className={`text-[8px] uppercase font-black ${f.isOnline ? 'text-green-500' : 'text-gray-600'}`}>{f.isOnline ? 'Online' : 'Offline'}</p>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+                    <button 
+                      onClick={() => onViewUser(f.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-all text-purple-400 hover:text-white"
+                    >
+                      <i className="fas fa-external-link-alt text-[10px]"></i>
+                    </button>
+                  </div>
+                ))}
+                {(isSelf && user.friends.length === 0) && (
+                   <p className="text-[10px] text-gray-600 uppercase font-black text-center py-4">No active connections</p>
+                )}
+                {!isSelf && (
+                   <p className="text-[10px] text-gray-600 uppercase font-black text-center py-4">Connections classified</p>
+                )}
+             </div>
+           </div>
+
+           <div className="glass p-6 rounded-3xl border-white/5">
+             <h3 className="text-white font-black uppercase text-xs tracking-widest flex items-center gap-2 mb-6">
+               <i className="fas fa-shield-halved text-purple-400"></i>League Affiliations
+             </h3>
+             <div className="space-y-3">
+                {targetUser.leagues.map((league, idx) => {
+                  const isActive = isSelf && idx === activeLeagueIndex;
+                  return (
+                    <div key={league.id} className={`p-4 rounded-xl border transition-all ${isActive ? 'bg-purple-600/20 border-purple-500/50 shadow-[0_0_15px_rgba(139,92,246,0.2)]' : 'bg-black/20 border-white/5'}`}>
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0">
+                          <p className={`text-xs font-black uppercase tracking-tight truncate ${isActive ? 'text-white' : 'text-gray-300'}`}>{league.name}</p>
+                          <p className="text-[9px] text-gray-500 uppercase font-black mt-0.5">{league.role} • {league.platform}</p>
+                        </div>
+                        {isActive && (
+                          <span className="bg-purple-600 text-white text-[7px] font-black px-2 py-0.5 rounded uppercase tracking-widest animate-pulse">ACTIVE LINK</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {targetUser.leagues.length === 0 && (
+                   <p className="text-[10px] text-gray-600 uppercase font-black text-center py-4">Unassigned Operative</p>
+                )}
+             </div>
+           </div>
         </div>
 
         <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-white font-black uppercase text-xs tracking-widest flex items-center gap-2">
-              <i className="fas fa-id-card text-purple-400"></i>
-              Character Roster
-            </h3>
-            <button 
-              onClick={() => setShowCharacterCreator(!showCharacterCreator)}
-              className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-            >
-              <i className={`fas ${showCharacterCreator ? 'fa-times' : 'fa-plus'} mr-2`}></i>
-              {showCharacterCreator ? 'Cancel Deployment' : 'New Character'}
-            </button>
+            <h3 className="text-white font-black uppercase text-xs tracking-widest flex items-center gap-2"><i className="fas fa-id-card text-purple-400"></i>Character Roster</h3>
+            {isSelf && (
+              <button 
+                onClick={() => setShowCharacterCreator(!showCharacterCreator)}
+                className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+              >
+                {showCharacterCreator ? 'Cancel' : 'Register New Alias'}
+              </button>
+            )}
           </div>
 
-          {showCharacterCreator && (
+          {showCharacterCreator && isSelf && (
             <div className="glass p-8 rounded-3xl border-purple-500/30 animate-slideUp space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Character Alias</label>
-                  <input 
-                    value={newCharName} 
-                    onChange={e => setNewCharName(e.target.value)}
-                    placeholder="e.g. Dark Knight" 
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500"
-                  />
+                  <input value={newCharName} onChange={e => setNewCharName(e.target.value)} placeholder="e.g. Ashen Vigilante" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500" />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Archive Case Link</label>
-                  <select 
-                    value={selectedCaseId} 
-                    onChange={e => setSelectedCaseId(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500"
-                  >
+                  <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500">
                     <option value="">No Archive Link</option>
-                    {allCases.map(c => <option key={c.id} value={c.id}>{c.name} ({c.entries.length} Lore)</option>)}
+                    {allCases.map(c => <option key={c.id} value={c.id}>{c.name} ({c.entries.length} Lore Entry)</option>)}
                   </select>
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Stored Armory Chassis</label>
-                  <select 
-                    value={selectedSuitId} 
-                    onChange={e => setSelectedSuitId(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500"
-                  >
+                  <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Armory Chassis Link</label>
+                  <select value={selectedSuitId} onChange={e => setSelectedSuitId(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500">
                     <option value="">No Chassis Link</option>
-                    {(Object.values(allSuits) as ArmorSuit[]).map(s => <option key={s.id} value={s.id}>{s.title} (PWR: {s.stats.power})</option>)}
+                    {(Object.values(allSuits) as ArmorSuit[]).map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
                   </select>
                 </div>
               </div>
-              <button 
-                onClick={handleCreateProfileCharacter}
-                className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl text-[10px] uppercase tracking-[0.2em] shadow-lg transition-all"
-              >
-                Confirm Deployment
-              </button>
+              <button onClick={handleCreateCharacter} className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl text-[10px] uppercase tracking-widest shadow-lg transition-all">Establish Identity</button>
             </div>
           )}
 
@@ -1731,160 +1881,68 @@ const ProfileView: React.FC<{ user: User, onUpdateUser: (data: Partial<User>) =>
               const linkedSuit = (Object.values(allSuits) as ArmorSuit[]).find(s => s.id === char.linkedSuitId);
               
               return (
-                <div key={char.id} className="bg-[#16162a] border border-white/5 rounded-3xl p-6 group transition-all hover:border-purple-500/40 relative overflow-hidden">
+                <div key={char.id} onClick={() => setInspectingChar(char)} className="bg-[#16162a] border border-white/5 rounded-3xl p-6 group transition-all hover:border-purple-500/40 relative overflow-hidden cursor-pointer">
                    <div className="flex gap-4">
-                      <div className="w-24 h-24 rounded-2xl bg-black/40 border border-white/10 flex items-center justify-center overflow-hidden shrink-0 relative">
-                        {linkedSuit?.image ? (
-                          <img src={linkedSuit.image} className="w-full h-full object-contain p-2" />
-                        ) : linkedCase?.entries?.[0]?.subjectImage ? (
-                          <img src={linkedCase.entries[0].subjectImage} className="w-full h-full object-cover" />
-                        ) : (
-                          <i className="fas fa-mask text-3xl text-gray-700"></i>
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-purple-900/40 to-transparent"></div>
+                      <div className="w-20 h-20 rounded-2xl bg-black/40 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                        {linkedSuit?.image ? <img src={linkedSuit.image} className="w-full h-full object-contain p-2" /> : <i className="fas fa-mask text-2xl text-gray-700"></i>}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-start">
-                          <h4 className="text-white font-black uppercase italic text-xl tracking-tighter truncate">{char.name}</h4>
-                        </div>
-                        <div className="mt-4 space-y-2">
+                        <h4 className="text-white font-black uppercase italic text-xl tracking-tighter truncate">{char.name}</h4>
+                        <div className="mt-2 space-y-1">
                           <div className="flex items-center gap-2">
-                             <i className={`fas fa-book-skull text-[10px] ${linkedCase ? 'text-amber-500' : 'text-gray-700'}`}></i>
-                             <span className="text-[9px] font-black uppercase text-gray-500">{linkedCase ? `Linked: ${linkedCase.name}` : 'Unlinked Lore'}</span>
+                             <i className={`fas fa-book-skull text-[9px] ${linkedCase ? 'text-amber-500' : 'text-gray-700'}`}></i>
+                             <span className="text-[8px] font-black uppercase text-gray-500">{linkedCase ? `Linked: ${linkedCase.name}` : 'Unlinked Lore'}</span>
                           </div>
                           <div className="flex items-center gap-2">
-                             <i className={`fas fa-shield-halved text-[10px] ${linkedSuit ? 'text-purple-400' : 'text-gray-700'}`}></i>
-                             <span className="text-[9px] font-black uppercase text-gray-500">{linkedSuit ? `Chassis: ${linkedSuit.title}` : 'No Armory'}</span>
+                             <i className={`fas fa-shield-halved text-[9px] ${linkedSuit ? 'text-purple-400' : 'text-gray-700'}`}></i>
+                             <span className="text-[8px] font-black uppercase text-gray-500">{linkedSuit ? `Chassis: ${linkedSuit.title}` : 'No Chassis'}</span>
                           </div>
                         </div>
                       </div>
                    </div>
-                   
-                   <div className="mt-6 flex gap-2">
-                      {linkedSuit && (
-                        <div className="flex-1 bg-black/40 rounded-xl p-2 border border-white/5 flex flex-col items-center">
-                          <span className="text-[7px] text-gray-600 font-black uppercase">Combat PWR</span>
-                          <span className="text-xs font-black text-white">{linkedSuit.stats.power}</span>
-                        </div>
-                      )}
-                      {linkedCase && (
-                        <div className="flex-1 bg-black/40 rounded-xl p-2 border border-white/5 flex flex-col items-center">
-                          <span className="text-[7px] text-gray-600 font-black uppercase">Archives</span>
-                          <span className="text-xs font-black text-white">{linkedCase.entries.length} Docs</span>
-                        </div>
-                      )}
-                   </div>
-
-                   <button 
-                     onClick={() => deleteProfileCharacter(char.id)}
-                     className="absolute top-4 right-4 text-red-500/20 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"
-                   >
-                     <i className="fas fa-trash-alt text-xs"></i>
-                   </button>
+                   {isSelf && (
+                     <button onClick={(e) => {
+                       e.stopPropagation();
+                       const updated = userProfileCharacters.filter(c => c.id !== char.id);
+                       setUserProfileCharacters(updated);
+                       localStorage.setItem(`profile_chars_${user.id}`, JSON.stringify(updated));
+                     }} className="absolute top-4 right-4 text-red-500/20 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                   )}
                 </div>
               );
             })}
             
             {userProfileCharacters.length === 0 && !showCharacterCreator && (
-              <div className="col-span-full py-20 bg-black/20 rounded-3xl border border-dashed border-white/5 flex flex-col items-center justify-center opacity-30">
+              <div className="col-span-full py-20 bg-black/20 rounded-3xl border border-dashed border-white/5 flex flex-col items-center justify-center opacity-30 text-center">
                 <i className="fas fa-address-book text-4xl mb-4"></i>
-                <p className="text-[10px] font-black uppercase tracking-widest">Roster Empty. Deploy your first Legend.</p>
+                <p className="text-[10px] font-black uppercase tracking-widest">Character Roster Empty<br/><span className="mt-1 block opacity-50">Identity signatures not yet registered</span></p>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {inspectingChar && (
+        <CharacterDossierOverlay 
+          character={inspectingChar} 
+          allCases={allCases} 
+          allSuits={Object.values(allSuits)} 
+          onClose={() => setInspectingChar(null)} 
+        />
+      )}
     </div>
   );
 };
 
 const LeagueEditor: React.FC<{ league: League, onSave: (l: League) => void, onClose: () => void }> = ({ league, onSave, onClose }) => {
   const [form, setForm] = useState<League>({ ...league });
-  const logoInput = useRef<HTMLInputElement>(null);
-  const bannerInput = useRef<HTMLInputElement>(null);
-  const bgInput = useRef<HTMLInputElement>(null);
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>, field: 'logo' | 'banner' | 'background') => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setForm({ ...form, [field]: reader.result as string });
-      reader.readAsDataURL(file);
-    }
-  };
-
+  const handleSave = () => { onSave(form); onClose(); };
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-xl animate-fadeIn">
-      <div className="bg-[#0d0d1f] border border-purple-500/30 rounded-3xl w-full max-w-2xl overflow-hidden shadow-[0_0_100px_rgba(139,92,246,0.2)] flex flex-col animate-slideUp">
-        <div className="p-8 border-b border-white/5 flex justify-between items-center">
-          <div>
-            <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">League Customization</h3>
-            <p className="text-purple-400 text-[10px] font-bold uppercase tracking-[0.2em]">Sanctuary Configuration Protocol</p>
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white transition-all"><i className="fas fa-times text-2xl"></i></button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-          <div className="space-y-4">
-            <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Sanctum Description</label>
-            <textarea 
-              value={form.description} 
-              onChange={e => setForm({ ...form, description: e.target.value })}
-              className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm h-32 outline-none focus:border-purple-500 transition-all resize-none"
-              placeholder="Enter league description..."
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="space-y-4">
-              <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">League Logo</label>
-              <div 
-                onClick={() => logoInput.current?.click()}
-                className="aspect-square bg-white/5 border-2 border-dashed border-white/10 rounded-2xl flex items-center justify-center cursor-pointer hover:border-purple-500/50 transition-all overflow-hidden"
-              >
-                {form.logo ? <img src={form.logo} className="w-full h-full object-cover" alt="Logo" /> : <i className="fas fa-ghost text-2xl text-gray-600"></i>}
-                <input ref={logoInput} type="file" className="hidden" accept="image/*" onChange={e => handleFile(e, 'logo')} />
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Sanctum Banner</label>
-              <div 
-                onClick={() => bannerInput.current?.click()}
-                className="aspect-square bg-white/5 border-2 border-dashed border-white/10 rounded-2xl flex items-center justify-center cursor-pointer hover:border-purple-500/50 transition-all overflow-hidden"
-              >
-                {form.banner ? <img src={form.banner} className="w-full h-full object-cover" alt="Banner" /> : <i className="fas fa-image text-2xl text-gray-600"></i>}
-                <input ref={bannerInput} type="file" className="hidden" accept="image/*" onChange={e => handleFile(e, 'banner')} />
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <label className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Environmental Background</label>
-              <div 
-                onClick={() => bgInput.current?.click()}
-                className="aspect-square bg-white/5 border-2 border-dashed border-white/10 rounded-2xl flex items-center justify-center cursor-pointer hover:border-purple-500/50 transition-all overflow-hidden"
-              >
-                {form.background ? <img src={form.background} className="w-full h-full object-cover" alt="Background" /> : <i className="fas fa-panorama text-2xl text-gray-600"></i>}
-                <input ref={bgInput} type="file" className="hidden" accept="image/*" onChange={e => handleFile(e, 'background')} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-8 border-t border-white/5 flex gap-4">
-          <button 
-            onClick={() => { onSave(form); onClose(); }}
-            className="flex-1 bg-purple-600 text-white font-black py-4 rounded-xl text-xs uppercase tracking-widest shadow-lg hover:bg-purple-500 transition-all"
-          >
-            Authorize Changes
-          </button>
-          <button 
-            onClick={onClose}
-            className="px-8 bg-white/5 text-gray-500 font-black py-4 rounded-xl text-xs uppercase tracking-widest hover:text-white transition-all"
-          >
-            Abort
-          </button>
-        </div>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-xl">
+      <div className="bg-[#0d0d1f] border border-purple-500/30 rounded-3xl w-full max-w-2xl p-8 space-y-8 shadow-[0_0_50px_rgba(139,92,246,0.15)]">
+        <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">League Customization</h3>
+        <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm h-32 resize-none outline-none focus:border-purple-500" />
+        <button onClick={handleSave} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-black py-4 rounded-xl uppercase transition-all shadow-lg">Authorize Changes</button>
       </div>
     </div>
   );
@@ -1893,286 +1951,31 @@ const LeagueEditor: React.FC<{ league: League, onSave: (l: League) => void, onCl
 const ArchiveView: React.FC<{ currentUser: User }> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<'knowledge' | 'cases'>('knowledge');
   const [archiveCases, setArchiveCases] = useState<any[]>([]);
-  const [sharedKnowledge, setSharedKnowledge] = useState<any[]>([]);
-  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
-  const [showKnowledgeForm, setShowKnowledgeForm] = useState(false);
-  const [kForm, setKForm] = useState({ title: '', content: '' });
-
   useEffect(() => {
     const savedCases = localStorage.getItem('league_archive_cases') || '[]';
-    const savedKnowledge = localStorage.getItem('league_knowledge_base') || '[]';
     setArchiveCases(JSON.parse(savedCases));
-    setSharedKnowledge(JSON.parse(savedKnowledge));
   }, []);
-
-  const handleManualUpload = () => {
-    if (!kForm.title || !kForm.content) return;
-    const newItem = {
-      id: Date.now().toString(),
-      title: kForm.title,
-      content: kForm.content,
-      author: currentUser.username,
-      timestamp: new Date().toISOString()
-    };
-    const updated = [newItem, ...sharedKnowledge];
-    setSharedKnowledge(updated);
-    localStorage.setItem('league_knowledge_base', JSON.stringify(updated));
-    setKForm({ title: '', content: '' });
-    setShowKnowledgeForm(false);
-  };
-
-  const saveToPersonalJournal = (title: string, content: string) => {
-    const savedNotes = localStorage.getItem('personal_notes') || '[]';
-    const notes = JSON.parse(savedNotes);
-    const newNote: Note = {
-      id: Date.now().toString(),
-      title: `Archive: ${title}`,
-      content: content,
-      folder: 'Archive'
-    };
-    localStorage.setItem('personal_notes', JSON.stringify([newNote, ...notes]));
-    alert("Saved to your Personal Journal notes!");
-  };
-
-  const selectedCase = archiveCases.find((c: any) => c.id === selectedCaseId);
-
-  const downloadDossier = (title: string, content: string, characterName: string, subjectImage?: string) => {
-    const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-    <head><meta charset='utf-8'><title>${title}</title>
-    <style>
-      body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #fdfdfd; margin: 40px; }
-      .dossier-header { border-bottom: 3px solid #581c87; margin-bottom: 20px; padding-bottom: 10px; }
-      h1 { color: #581c87; font-size: 24pt; margin: 0; text-transform: uppercase; }
-      .subject { font-size: 14pt; color: #666; font-weight: bold; margin-top: 5px; }
-      .meta { font-size: 10pt; color: #999; margin-bottom: 40px; border-left: 4px solid #eee; padding-left: 15px; font-style: italic; }
-      p { margin-bottom: 18px; text-align: justify; font-size: 11pt; }
-      .subject-img-container { text-align: center; margin-bottom: 30px; }
-      .subject-img { max-width: 300px; border: 4px solid #581c87; padding: 5px; }
-      .footer { margin-top: 60px; font-size: 9pt; border-top: 1px solid #eee; padding-top: 20px; color: #aaa; text-align: center; }
-    </style>
-    </head>
-    <body>
-      <div class='dossier-header'>
-        <h1>Archive Document: ${title}</h1>
-        <div class='subject'>Subject: ${characterName}</div>
-      </div>
-      ${subjectImage ? `
-      <div class='subject-img-container'>
-        <img src="${subjectImage}" class="subject-img" />
-      </div>` : ''}
-      <div class='meta'>
-        Source: The Ashen Veil Archive<br>
-        Date Logged: ${new Date().toLocaleDateString()}<br>
-        Authored By: ${currentUser.username}
-      </div>
-      <div class='content'>
-        ${content.split('\n').filter(l => l.trim()).map(p => `<p>${p}</p>`).join('')}
-      </div>
-      <div class='footer'>End of Transmission - Secure Archive Connection Active</div>
-    </body></html>`;
-    const blob = new Blob(['\ufeff', header], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${characterName.replace(/\s/g, '_')}_${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.doc`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
   return (
-    <div className="h-full flex flex-col space-y-6 animate-fadeIn">
+    <div className="h-full flex flex-col space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">League Archive</h2>
-          <p className="text-gray-500 text-xs">Knowledge repository and character case files.</p>
-        </div>
-        <div className="flex gap-2 bg-black/40 p-1.5 rounded-xl border border-white/5">
-          <button 
-            onClick={() => { setActiveTab('knowledge'); setSelectedCaseId(null); }}
-            className={`px-4 py-2 rounded-lg text-[10px] uppercase font-black tracking-widest transition-all ${activeTab === 'knowledge' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}
-          >
-            Knowledge Base
-          </button>
-          <button 
-            onClick={() => setActiveTab('cases')}
-            className={`px-4 py-2 rounded-lg text-[10px] uppercase font-black tracking-widest transition-all ${activeTab === 'cases' ? 'bg-amber-600 text-white' : 'text-gray-500 hover:text-white'}`}
-          >
-            Character Case Files
-          </button>
+        <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">League Archive</h2>
+        <div className="flex bg-black/40 p-1.5 rounded-xl border border-white/5">
+          <button onClick={() => setActiveTab('knowledge')} className={`px-4 py-2 rounded-lg text-[10px] uppercase font-black transition-all ${activeTab === 'knowledge' ? 'bg-purple-600 text-white' : 'text-gray-500'}`}>Knowledge Base</button>
+          <button onClick={() => setActiveTab('cases')} className={`px-4 py-2 rounded-lg text-[10px] uppercase font-black transition-all ${activeTab === 'cases' ? 'bg-amber-600 text-white' : 'text-gray-500'}`}>Character Case Files</button>
         </div>
       </div>
-      <div className="flex-1 bg-[#0d0d1f] rounded-2xl border border-white/5 overflow-hidden flex min-h-0">
+      <div className="flex-1 bg-[#0d0d1f] rounded-2xl border border-white/5 overflow-y-auto p-8 custom-scrollbar">
         {activeTab === 'cases' ? (
-          <>
-            <div className="w-80 border-r border-white/5 bg-black/20 flex flex-col shrink-0">
-              <div className="p-4 border-b border-white/5 bg-black/40">
-                <span className="text-[10px] text-amber-500 font-black uppercase tracking-widest">Active File Directory</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {archiveCases.map(c => (
+              <div key={c.id} className="p-6 bg-white/5 rounded-2xl border border-white/5 hover:border-amber-500/30 transition-all group">
+                <h4 className="text-white font-black uppercase text-lg italic tracking-tight">{c.name}</h4>
+                <p className="text-[10px] text-gray-500 uppercase font-black mt-1">Owner: {c.owner}</p>
+                <div className="mt-4 pt-4 border-t border-white/5 text-[9px] text-amber-500 font-black uppercase tracking-widest">{c.entries.length} Lore Documented</div>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-                {archiveCases.length === 0 ? (
-                  <div className="p-8 text-center opacity-30">
-                    <i className="fas fa-folder-open text-3xl mb-2"></i>
-                    <p className="text-[10px] uppercase font-black">No Case Files Found</p>
-                  </div>
-                ) : (
-                  archiveCases.map((c: any) => (
-                    <button 
-                      key={c.id} 
-                      onClick={() => setSelectedCaseId(c.id)}
-                      className={`w-full text-left p-4 rounded-xl transition-all border ${selectedCaseId === c.id ? 'bg-amber-600/10 border-amber-500/30 text-white font-black' : 'border-transparent text-gray-500 hover:bg-white/5'}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <i className="fas fa-user-secret"></i>
-                        <span className="text-xs uppercase">{c.name}</span>
-                      </div>
-                      <div className="flex justify-between items-center mt-2">
-                        <span className="text-[8px] text-gray-600">Created by {c.owner}</span>
-                        <span className="text-[8px] px-1.5 bg-black/40 rounded">{c.entries.length} Docs</span>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="flex-1 bg-black/20 overflow-y-auto custom-scrollbar p-12">
-              {selectedCase ? (
-                <div className="space-y-12 animate-fadeIn">
-                  <div className="flex justify-between items-end border-b border-amber-500/20 pb-8">
-                    <div>
-                      <h3 className="text-4xl font-black text-white italic uppercase tracking-tighter">Case: {selectedCase.name}</h3>
-                      <p className="text-amber-500/50 text-[10px] font-black uppercase tracking-widest mt-2">Classified Subject Data | Primary Handler: {selectedCase.owner}</p>
-                    </div>
-                    <div className="w-16 h-1 bg-amber-600/40 rounded-full mb-2"></div>
-                  </div>
-                  <div className="space-y-8">
-                    {selectedCase.entries.map((entry: any) => (
-                      <div key={entry.id} className="bg-[#16162a] border border-white/5 rounded-3xl p-8 hover:border-amber-500/20 transition-all flex flex-col md:flex-row gap-8">
-                        {entry.subjectImage && (
-                          <div className="w-48 h-48 shrink-0 rounded-2xl overflow-hidden border-2 border-amber-500/20 p-2 bg-black shadow-2xl relative">
-                            <img src={entry.subjectImage} className="w-full h-full object-cover rounded-xl grayscale hover:grayscale-0 transition-all duration-700" />
-                          </div>
-                        )}
-                        <div className="flex-1">
-                          <div className="flex justify-between items-center mb-6">
-                            <h4 className="text-2xl font-black text-amber-500 italic uppercase">{entry.title}</h4>
-                            <span className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">{new Date(entry.timestamp).toLocaleDateString()}</span>
-                          </div>
-                          <div className="text-gray-400 font-serif text-lg leading-relaxed space-y-4">
-                            {entry.content.split('\n').filter((l:any)=>l.trim()).map((p:string, i:number) => <p key={i}>{p}</p>)}
-                          </div>
-                          <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between">
-                            <span className="text-[9px] text-gray-500 font-black uppercase tracking-widest">Scribed By: {entry.author}</span>
-                            <div className="flex gap-2">
-                               <button 
-                                onClick={() => saveToPersonalJournal(entry.title, entry.content)}
-                                className="bg-amber-600/10 hover:bg-amber-600 text-amber-400 hover:text-white border border-amber-500/30 px-6 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                              >
-                                Save to Journal
-                              </button>
-                              <button 
-                                onClick={() => downloadDossier(entry.title, entry.content, selectedCase.name, entry.subjectImage)}
-                                className="bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-500/30 px-6 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                              >
-                                Download Dossier
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center opacity-20">
-                  <i className="fas fa-file-shield text-[120px] mb-8"></i>
-                  <h4 className="text-2xl font-black uppercase italic text-white tracking-widest">Select Subject Dossier</h4>
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
-             <div className="flex justify-between items-center mb-8">
-                <h3 className="text-xl font-black text-white italic uppercase">League Wisdom Archive</h3>
-                <button 
-                  onClick={() => setShowKnowledgeForm(!showKnowledgeForm)}
-                  className="bg-purple-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                >
-                  <i className={`fas ${showKnowledgeForm ? 'fa-times' : 'fa-plus'} mr-2`}></i>
-                  {showKnowledgeForm ? 'Cancel Entry' : 'Manual Upload'}
-                </button>
-             </div>
-
-             {showKnowledgeForm && (
-               <div className="glass p-6 rounded-2xl mb-8 animate-slideUp space-y-4">
-                  <input 
-                    value={kForm.title}
-                    onChange={e => setKForm({...kForm, title: e.target.value})}
-                    placeholder="Knowledge Title (e.g., Rare Spawn Timer)"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-500"
-                  />
-                  <textarea 
-                    value={kForm.content}
-                    onChange={e => setKForm({...kForm, content: e.target.value})}
-                    placeholder="Describe the wisdom..."
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white text-sm h-32 outline-none focus:border-purple-500"
-                  />
-                  <button 
-                    onClick={handleManualUpload}
-                    className="w-full bg-green-600 text-white font-black py-4 rounded-xl text-[10px] uppercase"
-                  >
-                    Publish to Knowledge Base
-                  </button>
-               </div>
-             )}
-
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-10">
-               {(sharedKnowledge || []).map((item: any) => (
-                 <div key={item.id} className="bg-[#16162a] border border-white/5 rounded-3xl p-8 hover:border-purple-500/20 transition-all">
-                    <div className="flex justify-between items-start mb-4">
-                       <h4 className="text-xl font-black text-purple-400 italic uppercase">{item.title}</h4>
-                       <span className="text-[9px] text-gray-500">{new Date(item.timestamp).toLocaleDateString()}</span>
-                    </div>
-                    <div className="text-gray-300 text-sm font-serif leading-relaxed line-clamp-6 mb-6">
-                       {item.content}
-                    </div>
-                    <div className="pt-4 border-t border-white/5 flex justify-between items-center">
-                       <span className="text-[8px] text-gray-600 font-black uppercase">Contributor: {item.author}</span>
-                       <div className="flex gap-3">
-                         <button 
-                          onClick={() => saveToPersonalJournal(item.title, item.content)}
-                          className="text-amber-500 hover:text-white text-[9px] uppercase font-black"
-                         >
-                           Save to Journal
-                         </button>
-                         <button 
-                           onClick={() => {
-                             const blob = new Blob([item.content], { type: 'text/plain' });
-                             const url = URL.createObjectURL(blob);
-                             const link = document.createElement('a');
-                             link.href = url;
-                             link.download = `${item.title.replace(/\s/g, '_')}.txt`;
-                             link.click();
-                           }}
-                           className="text-purple-500 hover:text-white text-[9px] uppercase font-black"
-                         >
-                           Download Wisdom
-                         </button>
-                       </div>
-                    </div>
-                 </div>
-               ))}
-               {(sharedKnowledge || []).length === 0 && !showKnowledgeForm && (
-                 <div className="col-span-full py-20 flex flex-col items-center justify-center opacity-10">
-                    <i className="fas fa-scroll text-9xl mb-4"></i>
-                    <p className="font-black uppercase tracking-widest">No wisdom shared yet</p>
-                 </div>
-               )}
-             </div>
+            ))}
           </div>
-        )}
+        ) : <p className="text-gray-600 text-center py-20 uppercase font-black tracking-widest opacity-30">Awaiting shared wisdom...</p>}
       </div>
     </div>
   );
@@ -2182,112 +1985,29 @@ const ChronoScribeView: React.FC<{ currentUser: User }> = ({ currentUser }) => {
   const [query, setQuery] = useState('');
   const [answer, setAnswer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [shareTitle, setShareTitle] = useState('');
-  const [showShareDialog, setShowShareDialog] = useState(false);
 
   const handleAsk = async () => {
     if (!query.trim()) return;
     setLoading(true);
     setAnswer(null);
-    setShowShareDialog(false);
     const res = await getGeminiResponse(query);
     setAnswer(res);
     setLoading(false);
   };
 
-  const handleShare = () => {
-    if (!answer || !shareTitle) return;
-    const saved = localStorage.getItem('league_knowledge_base') || '[]';
-    const knowledge = JSON.parse(saved);
-    const newItem = {
-      id: Date.now().toString(),
-      title: shareTitle,
-      content: answer,
-      author: currentUser.username,
-      timestamp: new Date().toISOString()
-    };
-    localStorage.setItem('league_knowledge_base', JSON.stringify([newItem, ...knowledge]));
-    alert("Knowledge shared successfully to the Archive!");
-    setShowShareDialog(false);
-    setShareTitle('');
-  };
-
   return (
-    <div className="max-w-4xl mx-auto h-full flex flex-col space-y-8 animate-fadeIn overflow-y-auto pr-2 custom-scrollbar">
-      <div className="text-center py-8 shrink-0">
-         <div className="inline-flex items-center justify-center w-20 h-20 bg-purple-600 rounded-3xl mystic-glow mb-6 transform rotate-12">
-           <i className="fas fa-wand-magic-sparkles text-3xl text-white"></i>
-         </div>
-         <h1 className="text-4xl font-black text-white mb-4 tracking-tight">The ChronoScribe</h1>
-         <p className="text-gray-400 max-w-lg mx-auto leading-relaxed text-sm">
-           Greetings, seeker. I am the ChronoScribe, keeper of DC Universe Online's ancient wisdom. 
-           Ask me about farming, builds, raids, or any knowledge you seek from the multiverse.
-         </p>
+    <div className="max-w-4xl mx-auto h-full flex flex-col space-y-8 overflow-y-auto p-8 custom-scrollbar">
+      <div className="text-center">
+        <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center text-3xl shadow-2xl mx-auto mb-4 italic font-black text-white">?</div>
+        <h1 className="text-4xl font-black text-white mb-4 italic uppercase tracking-tighter">The ChronoScribe</h1>
       </div>
-      <div className="flex-1 flex flex-col space-y-6 min-h-0">
-        <div className="glass p-4 rounded-2xl focus-within:ring-2 focus-within:ring-purple-500/50 transition-all shrink-0">
-          <textarea
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleAsk())}
-            placeholder="Ask about farming, builds, raids, or any DCUO knowledge..."
-            className="w-full bg-transparent border-none text-white text-lg placeholder:text-gray-600 focus:outline-none min-h-[120px] resize-none p-4"
-          />
-          <div className="flex justify-between items-center px-4 py-2 border-t border-white/5 mt-4">
-             <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Powered by Gemini Oracle</span>
-             <button 
-               onClick={handleAsk}
-               disabled={loading}
-               className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-8 py-2 rounded-xl transition-all flex items-center space-x-2 disabled:opacity-50 shadow-lg"
-             >
-               {loading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-paper-plane"></i>}
-               <span>Summon Knowledge</span>
-             </button>
-          </div>
-        </div>
-        
-        {answer && (
-          <div className="space-y-4">
-            <div className="glass p-8 rounded-2xl border-purple-500/20 shadow-2xl animate-slideUp">
-               <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center">
-                      <i className="fas fa-sparkles text-white text-xs"></i>
-                    </div>
-                    <h3 className="text-white font-bold">ChronoScribe's Revelation</h3>
-                  </div>
-                  {!showShareDialog && (
-                    <button 
-                      onClick={() => setShowShareDialog(true)}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
-                    >
-                      <i className="fas fa-share-nodes mr-2"></i>
-                      Share to Archive
-                    </button>
-                  )}
-               </div>
-
-               {showShareDialog && (
-                 <div className="bg-black/30 border border-indigo-500/20 rounded-xl p-4 mb-6 flex gap-3 animate-fadeIn">
-                    <input 
-                      autoFocus
-                      value={shareTitle}
-                      onChange={e => setShareTitle(e.target.value)}
-                      placeholder="Title for this revelation..."
-                      className="flex-1 bg-black/40 border border-white/5 rounded-lg px-3 py-1 text-white text-[11px] outline-none"
-                    />
-                    <button onClick={handleShare} className="bg-green-600 text-white px-4 py-1 rounded-lg text-[9px] font-black uppercase">Publish</button>
-                    <button onClick={() => setShowShareDialog(false)} className="bg-white/5 text-gray-500 px-4 py-1 rounded-lg text-[9px] font-black uppercase">Cancel</button>
-                 </div>
-               )}
-
-               <div className="max-w-none text-gray-300 leading-relaxed space-y-4 text-sm font-serif">
-                  {answer.split('\n').map((line, i) => line.trim() ? <p key={i}>{line}</p> : <br key={i}/>)}
-               </div>
-            </div>
-          </div>
-        )}
+      <div className="space-y-6">
+        <textarea value={query} onChange={e => setQuery(e.target.value)} placeholder="Seek wisdom on builds, farming, or combat tactical data..." className="w-full bg-white/5 border border-white/10 rounded-2xl p-6 text-white text-lg h-40 outline-none focus:border-purple-500 transition-all resize-none" />
+        <button onClick={handleAsk} disabled={loading} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-black py-4 rounded-xl uppercase tracking-widest shadow-lg transition-all">{loading ? <i className="fas fa-spinner fa-spin mr-2"></i> : <i className="fas fa-sparkles mr-2"></i>}{loading ? 'Processing Query...' : 'Summon Knowledge'}</button>
+        {answer && <div className="bg-white/5 p-8 rounded-2xl text-gray-300 leading-relaxed font-serif italic border border-white/5 animate-fadeIn">"{answer}"</div>}
       </div>
     </div>
   );
 };
+
+export default App;

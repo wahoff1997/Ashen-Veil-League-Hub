@@ -7,9 +7,10 @@ interface LayoutProps {
   activeView: View;
   onViewChange: (view: View) => void;
   currentUser: User;
+  onLogout: () => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, activeView, onViewChange, currentUser }) => {
+const Layout: React.FC<LayoutProps> = ({ children, activeView, onViewChange, currentUser, onLogout }) => {
   const navItems = [
     { view: View.Home, icon: 'fa-house', label: 'Home' },
     { view: View.Dorm, icon: 'fa-bed', label: 'Dorm' },
@@ -54,6 +55,16 @@ const Layout: React.FC<LayoutProps> = ({ children, activeView, onViewChange, cur
             </button>
           ))}
         </nav>
+
+        <div className="p-4 border-t border-white/5">
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center px-4 py-3 space-x-4 transition-all hover:bg-red-500/10 text-sm text-red-400 font-black uppercase tracking-widest"
+          >
+            <i className="fas fa-power-off w-5 text-center"></i>
+            <span>Terminate Session</span>
+          </button>
+        </div>
       </aside>
 
       {/* Main Content Area */}
