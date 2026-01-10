@@ -1,3 +1,5 @@
+// types.ts
+
 export type UUID = string;
 export type ClerkID = string;
 
@@ -32,12 +34,12 @@ export interface NewsArticle {
   category: NewsCategory;
   content: string;
   author: string;
-  createdAt: string;
+  createdAt: string; // ISO timestamp
   imageUrl?: string;
 }
 
 export interface User {
-  id: ClerkID;
+  id: ClerkID; // Clerk user ID
   username: string;
   email: string;
   thoughtEssence: number;
@@ -75,16 +77,4 @@ export interface Trophy {
   image: string;
 }
 
-export interface UserTrophy {
-  id: UUID;
-  userId: ClerkID;
-  trophyId: UUID;
-  earnedAt: string;
-}
-
-export interface UserWithRelations extends User {
-  leagues: League[];
-  friends: Friend[];
-  trophies: Trophy[];
-}
 
