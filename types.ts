@@ -39,42 +39,12 @@ export interface NewsArticle {
 }
 
 export interface User {
-  id: ClerkID; // Clerk user ID
+  id: ClerkID;
   username: string;
   email: string;
   thoughtEssence: number;
   avatar?: string;
   dormBackground?: string;
-}
 
-export interface Friend {
-  id: ClerkID;
-  username: string;
-  avatar?: string;
-}
-
-export interface League {
-  id: UUID;
-  name: string;
-  platform: string;
-  description?: string;
-  logo?: string;
-  banner?: string;
-  background?: string;
-}
-
-export interface LeagueMember {
-  id: UUID;
-  leagueId: UUID;
-  userId: ClerkID;
-  role: "Leader" | "Member";
-}
-
-export interface Trophy {
-  id: UUID;
-  title: string;
-  description: string;
-  image: string;
-}
 
 
