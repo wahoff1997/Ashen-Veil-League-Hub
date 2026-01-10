@@ -1,4 +1,4 @@
-
+import { supabase } from "./services/supabase";
 import React, { useState, useEffect, useRef } from 'react';
 import Layout from './components/Layout';
 import DormRoom from './components/Dorm/DormRoom';
