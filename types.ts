@@ -1,67 +1,90 @@
-
-import React from 'react';
+export type UUID = string;
+export type ClerkID = string;
 
 export enum View {
-  Home = 'Home',
-  Dorm = 'Dorm',
-  LeagueFinder = 'LeagueFinder',
-  Profile = 'Profile',
-  Characters = 'Characters',
-  Echo = 'Echo',
-  Journal = 'Journal',
-  Trophies = 'Trophies',
-  Archive = 'Archive',
-  History = 'History',
-  Trader = 'Trader',
-  Broker = 'Broker',
-  Vault = 'Vault',
-  ChronoScribe = 'ChronoScribe'
+  Home = "Home",
+  Dorm = "Dorm",
+  LeagueFinder = "LeagueFinder",
+  Profile = "Profile",
+  Characters = "Characters",
+  Echo = "Echo",
+  Journal = "Journal",
+  Trophies = "Trophies",
+  Archive = "Archive",
+  History = "History",
+  Trader = "Trader",
+  Broker = "Broker",
+  Vault = "Vault",
+  ChronoScribe = "ChronoScribe"
 }
 
+export type NewsCategory =
+  | "Raid"
+  | "Recruitment"
+  | "Achievement"
+  | "Announcement"
+  | "Tournament";
+
 export interface NewsArticle {
-  id: string;
-  leagueId: string;
+  id: UUID;
+  leagueId: UUID;
   title: string;
-  category: 'Raid' | 'Recruitment' | 'Achievement' | 'Announcement' | 'Tournament';
+  category: NewsCategory;
   content: string;
   author: string;
-  timestamp: string;
+  createdAt: string;
   imageUrl?: string;
 }
 
 export interface User {
-  id: string;
+  id: ClerkID;
   username: string;
   email: string;
   thoughtEssence: number;
   avatar?: string;
-  isOnline: boolean;
-  leagues: League[];
-  friends: Friend[];
   dormBackground?: string;
 }
 
 export interface Friend {
-  id: string;
+  id: ClerkID;
   username: string;
   avatar?: string;
-  isOnline: boolean;
 }
 
 export interface League {
-  id: string;
+  id: UUID;
   name: string;
-  memberCount: number;
   platform: string;
-  role: 'Leader' | 'Member';
   description?: string;
   logo?: string;
   banner?: string;
   background?: string;
 }
 
+export interface LeagueMember {
+  id: UUID;
+  leagueId: UUID;
+  userId: ClerkID;
+  role: "Leader" | "Member";
+}
+
 export interface Trophy {
-  id: string;
+  id: UUID;
   title: string;
   description: string;
   image: string;
+}
+
+export interface UserTrophy {
+  id: UUID;
+  userId: ClerkID;
+  trophyId: UUID;
+  earnedAt: string;
+}
+
+export interface UserWithRelations extends User {
+  leagues: League[];
+  friends: Friend[];
+  trophies: Trophy[];
+}
+
