@@ -37,6 +37,10 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User>(INITIAL_USER);
   const [showLeagueEditor, setShowLeagueEditor] = useState(false);
   const [activeLeagueIndex, setActiveLeagueIndex] = useState(0);
+  async function testSupabase() {
+    const { data, error } = await supabase.auth.getSession();
+    console.log("Supabase session:", data, error);
+  }
 
   useEffect(() => {
     const savedBg = localStorage.getItem('dorno_background');
@@ -238,6 +242,9 @@ const App: React.FC = () => {
 };
 
 export default App;
+<button onClick={testSupabase}>
+  Test Supabase
+</button>
 
 const LeagueRosterView: React.FC<{ activeLeague: League, currentUser: User }> = ({ activeLeague, currentUser }) => {
   const [inspectingMember, setInspectingMember] = useState<any | null>(null);
